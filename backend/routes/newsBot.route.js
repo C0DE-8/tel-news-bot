@@ -18,12 +18,13 @@ const NEWS_TOPICS = {
   ],
 };
 
-function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminChatIds, requireHttpAdmin }) {
+function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminChatIds, groupChatIds, requireHttpAdmin }) {
   const bot = new NewsBot({
     token,
     defaultIntervalMinutes,
     useWebhook,
     adminChatIds,
+    groupChatIds,
   });
 
   return {
@@ -57,11 +58,12 @@ async function handleRoute(req, res, bot, requireHttpAdmin) {
 }
 
 class NewsBot {
-  constructor({ token, defaultIntervalMinutes, useWebhook, adminChatIds }) {
+  constructor({ token, defaultIntervalMinutes, useWebhook, adminChatIds, groupChatIds }) {
     this.token = token;
     this.defaultIntervalMinutes = defaultIntervalMinutes;
     this.useWebhook = Boolean(useWebhook);
     this.adminChatIds = parseAdminChatIds(adminChatIds);
+    this.configuredGroups = parseConfiguredGroups(groupChatIds);
     this.offset = 0;
     this.started = false;
     this.groupTimers = new Map();
@@ -110,7 +112,13 @@ class NewsBot {
   listKnownGroups() {
     ensureDataFiles();
     const chats = readJson(CHATS_FILE);
-    return Object.values(chats).filter((chat) => isGroupChatType(chat.type));
+    const learnedGroups = Object.values(chats).filter((chat) => isGroupChatType(chat.type));
+    const groups = new Map();
+
+    for (const group of this.configuredGroups) groups.set(group.id, group);
+    for (const group of learnedGroups) groups.set(group.id, group);
+
+    return [...groups.values()];
   }
 
   getGroupConfig(chatId) {
@@ -487,6 +495,12 @@ class NewsBot {
     }
 
     if (action === "status") {
+      if (!isLikelyGroupChatId(targetChatId)) {
+        await this.sendGroupPicker(chatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
+        return;
+      }
+
       await this.sendChatStatus(targetChatId);
       await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
       return;
@@ -495,6 +509,12 @@ class NewsBot {
     if (action === "news") {
       if (!(await this.requireAdmin({ from: callbackQuery.from, chat: callbackQuery.message.chat }))) {
         await this.answerCallbackQuery(callbackQuery.id, "Admin only.");
+        return;
+      }
+
+      if (!isLikelyGroupChatId(targetChatId)) {
+        await this.sendGroupPicker(chatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
         return;
       }
 
@@ -953,6 +973,24 @@ function parseAdminChatIds(value) {
       .map((item) => item.trim())
       .filter(Boolean)
   );
+}
+
+function parseConfiguredGroups(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [id, title] = item.split("|").map((part) => part.trim());
+      return {
+        id,
+        title: title || id,
+        type: "group",
+        username: null,
+        updatedAt: null,
+        source: "env",
+      };
+    });
 }
 
 function normalizeTargetChatId(value, currentChatId) {

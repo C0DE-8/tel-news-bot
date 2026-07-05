@@ -14,6 +14,14 @@ Content-Type: application/json
 
 Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
 
+On Vercel, also set this environment variable so the bot always knows which group to post into:
+
+```text
+TELEGRAM_GROUP_CHAT_IDS=-1001234567890|Main News Group
+```
+
+Use the real Telegram group id. Group ids are usually negative numbers.
+
 ## 1. Health Check
 
 Purpose: Check that the deployed API is online.
@@ -188,6 +196,8 @@ canPost
 
 Purpose: Verify the bot can send a real message into the selected group.
 
+Important: `chatId` must be the group id, not your private Telegram user/admin id. If you put your private id here, Telegram will send the message to you.
+
 ```text
 Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/group-test-message
@@ -206,6 +216,8 @@ Body:
 ## 10. Configure News Posting
 
 Purpose: Configure the group to receive news over time.
+
+Important: `chatId` must be the group id, not your private Telegram user/admin id.
 
 ```text
 Method: POST

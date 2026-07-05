@@ -15,6 +15,7 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=your_telegram_user_id
+TELEGRAM_GROUP_CHAT_IDS=-1001234567890|Main News Group
 ```
 
 3. Start the bot:
@@ -52,7 +53,7 @@ The bot stores group settings in `backend/data/groups.json`.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
-The group picker shows groups the bot has seen while running. It learns groups from Telegram membership updates or from any group message it receives.
+The group picker shows groups from `TELEGRAM_GROUP_CHAT_IDS` plus groups the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
 
 ## HTTP Routes
 

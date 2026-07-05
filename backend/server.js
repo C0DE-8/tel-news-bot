@@ -18,6 +18,7 @@ const newsBotRoute = createNewsBotRoute({
   defaultIntervalMinutes: Number(process.env.POST_INTERVAL_MINUTES || 30),
   useWebhook: process.env.TELEGRAM_USE_WEBHOOK === "true",
   adminChatIds: process.env.TELEGRAM_ADMIN_CHAT_IDS,
+  groupChatIds: process.env.TELEGRAM_GROUP_CHAT_IDS,
   requireHttpAdmin,
 });
 const adminController = createAdminController({ bot: newsBotRoute.bot });
