@@ -59,6 +59,15 @@ async function handleWebhookRoute(req, res, bot, requireHttpAdmin) {
       ],
     });
   } catch (error) {
+    if (req.method === "POST" && pathname === "/webhook/telegram") {
+      console.error("Telegram webhook update failed:", error);
+      sendJson(res, 200, {
+        ok: false,
+        error: error.message,
+      });
+      return;
+    }
+
     sendJson(res, error.statusCode || 500, {
       ok: false,
       error: error.message,

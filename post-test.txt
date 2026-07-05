@@ -46,9 +46,11 @@ Body:
 ```json
 {
   "url": "https://tel-news-bot-ivory.vercel.app/webhook/telegram",
-  "dropPendingUpdates": false
+  "dropPendingUpdates": true
 }
 ```
+
+Use `dropPendingUpdates: true` after a webhook error like `500 Internal Server Error`. That clears Telegram's retry queue so old failed updates do not keep replaying.
 
 ## 3. Check Webhook Info
 

@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { getPathname, sendJson } = require("../utils/http");
 
-const DATA_DIR = path.join(__dirname, "..", "data");
+const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? path.join("/tmp", "tel-news-bot-data") : path.join(__dirname, "..", "data"));
 const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
