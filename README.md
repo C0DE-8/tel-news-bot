@@ -78,10 +78,4 @@ POST /test/update
 
 See `post-test.txt` for Talend/API-client test examples using the live URL.
 
-HTTP bot-status, admin, test, and webhook-management routes also use `TELEGRAM_ADMIN_CHAT_IDS`. Send the matching Telegram user id as:
-
-```text
-x-admin-chat-id: your_telegram_user_id
-```
-
-The live Telegram receiver `POST /webhook/telegram` stays open because Telegram cannot send your custom admin header.
+HTTP bot-status, admin, test, and webhook-management routes are enabled when `TELEGRAM_ADMIN_CHAT_IDS` is set on the server. Talend does not need to send an admin header.

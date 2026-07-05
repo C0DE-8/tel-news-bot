@@ -6,19 +6,13 @@ Live base URL:
 https://tel-news-bot-ivory.vercel.app
 ```
 
-Protected HTTP routes need this header. The value must match `TELEGRAM_ADMIN_CHAT_IDS` in `.env`:
-
-```text
-x-admin-chat-id: ADMIN_USER_ID
-```
-
 For JSON requests also add:
 
 ```text
 Content-Type: application/json
 ```
 
-`POST /webhook/telegram` is different: Telegram calls it directly, so do not require `x-admin-chat-id` on that route.
+Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
 
 ## 1. Health Check
 
@@ -46,7 +40,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram/set
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -64,8 +57,7 @@ Purpose: Confirm Telegram is using your live webhook URL.
 ```text
 Method: GET
 URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram/info
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
@@ -82,8 +74,7 @@ Purpose: Check bot runtime mode, topics, and whether admin restriction is active
 ```text
 Method: GET
 URL: https://tel-news-bot-ivory.vercel.app/bot/status
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
@@ -94,8 +85,7 @@ Purpose: See groups the bot has learned from Telegram updates.
 ```text
 Method: GET
 URL: https://tel-news-bot-ivory.vercel.app/admin/groups
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
@@ -146,7 +136,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/test/update
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -177,7 +166,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/group-check
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -203,7 +191,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/group-test-message
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -223,7 +210,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -253,7 +239,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -276,7 +261,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -297,8 +281,7 @@ Purpose: See all saved group news configs.
 ```text
 Method: GET
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
@@ -309,8 +292,7 @@ Purpose: See config for one group.
 ```text
 Method: GET
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/CHAT_ID
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
@@ -323,7 +305,6 @@ Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-stop
 Headers:
   Content-Type: application/json
-  x-admin-chat-id: ADMIN_USER_ID
 Body:
 ```
 
@@ -340,8 +321,7 @@ Purpose: Remove webhook if you want to switch back to polling/local development.
 ```text
 Method: DELETE
 URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram
-Headers:
-  x-admin-chat-id: ADMIN_USER_ID
+Headers: none
 Body: none
 ```
 
