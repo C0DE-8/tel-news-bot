@@ -76,7 +76,7 @@ GET /test/ping
 POST /test/update
 ```
 
-See `post-test.txt` for curl examples.
+See `post-test.txt` for Talend/API-client test examples using the live URL.
 
 HTTP bot-status, admin, test, and webhook-management routes also use `TELEGRAM_ADMIN_CHAT_IDS`. Send the matching Telegram user id as:
 

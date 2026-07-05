@@ -1,330 +1,365 @@
-# Local API test examples
-#
-# Start the server first:
-# cd backend
-# npm start
-#
-# Or with nodemon:
-# npm run dev
-#
-# Default local URL:
-BASE_URL=http://localhost:3000
-ADMIN_HEADER="x-admin-chat-id: ADMIN_USER_ID"
+# Talend API Tester collection notes
 
-# Protected HTTP routes require x-admin-chat-id to match TELEGRAM_ADMIN_CHAT_IDS.
-# Telegram itself does not send this header to POST /webhook/telegram.
+Live base URL:
 
-### Health
-curl -s http://localhost:3000/health
+```text
+https://tel-news-bot-ivory.vercel.app
+```
 
-### Bot runtime status
-curl -s http://localhost:3000/bot/status \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+Protected HTTP routes need this header. The value must match `TELEGRAM_ADMIN_CHAT_IDS` in `.env`:
 
-### Test router ping
-curl -s http://localhost:3000/test/ping \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+```text
+x-admin-chat-id: ADMIN_USER_ID
+```
 
-### Admin: list every group config
-curl -s http://localhost:3000/admin/news-config \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+For JSON requests also add:
 
-### Admin: list known groups the bot has seen
-curl -s http://localhost:3000/admin/groups \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+```text
+Content-Type: application/json
+```
 
-### Admin: configure a group to post crypto news every 30 minutes
-### Replace CHAT_ID with your Telegram group chat id.
-curl -s -X POST http://localhost:3000/admin/news-config \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "chatId": "CHAT_ID",
-    "topic": "crypto",
-    "intervalMinutes": 30,
-    "postLimit": 10,
-    "postNow": false
-  }'
+`POST /webhook/telegram` is different: Telegram calls it directly, so do not require `x-admin-chat-id` on that route.
 
-### Admin: configure politics news to start at a specific time
-### postAt accepts any valid ISO date string.
-curl -s -X POST http://localhost:3000/admin/news-config \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "chatId": "CHAT_ID",
-    "topic": "politics",
-    "intervalMinutes": 60,
-    "postLimit": 5,
-    "postAt": "2099-01-01T18:00:00.000Z"
-  }'
+## 1. Health Check
 
-### Admin: post one item immediately after saving config
-curl -s -X POST http://localhost:3000/admin/news-config \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "chatId": "CHAT_ID",
-    "topic": "crypto",
-    "intervalMinutes": 30,
-    "postLimit": 3,
-    "postNow": true
-  }'
+Purpose: Check that the deployed API is online.
 
-### Admin: stop news for a group
-curl -s -X POST http://localhost:3000/admin/news-stop \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{"chatId":"CHAT_ID"}'
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/health
+Headers: none
+Body: none
+```
 
-### Admin: get one group config
-curl -s http://localhost:3000/admin/news-config/CHAT_ID \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+Expected:
 
-### Admin: check if the bot can see and post in a group
-### Replace CHAT_ID with the Telegram group chat id, usually a negative number.
-curl -s -X POST http://localhost:3000/admin/group-check \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{"chatId":"CHAT_ID"}'
+```json
+{ "ok": true }
+```
 
-### Admin: same group check with GET
-curl -s http://localhost:3000/admin/group-check/CHAT_ID \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+## 2. Set Telegram Webhook
 
-### Admin: send a test message to the group
-curl -s -X POST http://localhost:3000/admin/group-test-message \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "chatId": "CHAT_ID",
-    "text": "Test message from the news bot."
-  }'
+Purpose: Tell Telegram to send bot updates to your live Vercel API.
 
-### Test router: simulate a Telegram /status update locally
-### This calls the same handler used by Telegram updates.
-### It also teaches the bot that CHAT_ID is a group it can show as a button later.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1000,
-    "message": {
-      "message_id": 1,
-      "chat": { "id": "CHAT_ID", "type": "group", "title": "My Test Group" },
-      "text": "/status"
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram/set
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
+
+```json
+{
+  "url": "https://tel-news-bot-ivory.vercel.app/webhook/telegram",
+  "dropPendingUpdates": false
+}
+```
+
+## 3. Check Webhook Info
+
+Purpose: Confirm Telegram is using your live webhook URL.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram/info
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+Look for:
+
+```text
+url = https://tel-news-bot-ivory.vercel.app/webhook/telegram
+```
+
+## 4. Bot Runtime Status
+
+Purpose: Check bot runtime mode, topics, and whether admin restriction is active.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/bot/status
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+## 5. List Known Groups
+
+Purpose: See groups the bot has learned from Telegram updates.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/admin/groups
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+Important: Telegram does not let bots list every group they are in. The bot learns a group after it receives `my_chat_member` from Telegram or any message/update from that group.
+
+## 6. Telegram Webhook Receiver
+
+Purpose: This is the route Telegram calls. You normally do not call this manually except for simulation.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "update_id": 10030,
+  "my_chat_member": {
+    "chat": {
+      "id": "CHAT_ID",
+      "type": "group",
+      "title": "My Test Group"
+    },
+    "from": {
+      "id": "ADMIN_USER_ID"
+    },
+    "old_chat_member": {
+      "status": "left"
+    },
+    "new_chat_member": {
+      "status": "administrator"
     }
-  }'
+  }
+}
+```
 
-### Test router: get your admin id helper response shape
-### Replace ADMIN_USER_ID with the Telegram user id allowed in TELEGRAM_ADMIN_CHAT_IDS.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1002,
-    "message": {
-      "message_id": 3,
-      "from": { "id": "ADMIN_USER_ID" },
-      "chat": { "id": "CHAT_ID", "type": "private" },
-      "text": "/adminid"
-    }
-  }'
+Use this only to simulate Telegram telling the bot it was added to a group. Replace `CHAT_ID` with the real group id if you know it.
 
-### Test router: simulate opening the Telegram admin button panel
-### If CHAT_ID was learned above, the panel will include it as a button.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1003,
-    "message": {
-      "message_id": 4,
-      "from": { "id": "ADMIN_USER_ID" },
-      "chat": { "id": "CHAT_ID", "type": "group" },
-      "text": "/adminpanel"
-    }
-  }'
+## 7. Test Update Router
 
-### Test router: simulate Telegram telling the bot it was added to a group
-### This also teaches the bot that CHAT_ID is a group it can show as a button.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 10030,
-    "my_chat_member": {
-      "chat": { "id": "CHAT_ID", "type": "group", "title": "My Test Group" },
-      "from": { "id": "ADMIN_USER_ID" },
-      "old_chat_member": { "status": "left" },
-      "new_chat_member": { "status": "administrator" }
-    }
-  }'
+Purpose: Simulate Telegram updates through the test route. This route is protected.
 
-### Test router: simulate clicking a known group button
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 10031,
-    "callback_query": {
-      "id": "callback-group-1",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 41,
-        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
-      },
-      "data": "admin:group:CHAT_ID"
-    }
-  }'
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/test/update
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
 
-### Test router: simulate clicking the Admin ID button
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 10032,
-    "callback_query": {
-      "id": "callback-id-1",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 42,
-        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
-      },
-      "data": "admin:id:this"
-    }
-  }'
+```json
+{
+  "update_id": 10031,
+  "message": {
+    "message_id": 1,
+    "from": {
+      "id": "ADMIN_USER_ID"
+    },
+    "chat": {
+      "id": "CHAT_ID",
+      "type": "group",
+      "title": "My Test Group"
+    },
+    "text": "/start"
+  }
+}
+```
 
-### Test router: button step 1, click Set news
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1004,
-    "callback_query": {
-      "id": "callback-test-1",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 5,
-        "chat": { "id": "CHAT_ID", "type": "group" }
-      },
-      "data": "admin:configure:this"
-    }
-  }'
+## 8. Check Group Access
 
-### Test router: button step 2, choose Crypto
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1005,
-    "callback_query": {
-      "id": "callback-test-2",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 6,
-        "chat": { "id": "CHAT_ID", "type": "group" }
-      },
-      "data": "admin:topic:this:crypto"
-    }
-  }'
+Purpose: Ask Telegram whether the bot can see the group and whether it can post.
 
-### Test router: button step 3, choose 30 minutes
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1006,
-    "callback_query": {
-      "id": "callback-test-3",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 7,
-        "chat": { "id": "CHAT_ID", "type": "group" }
-      },
-      "data": "admin:interval:this:crypto:30"
-    }
-  }'
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/group-check
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
 
-### Test router: button step 4, save with 10 post limit
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1007,
-    "callback_query": {
-      "id": "callback-test-4",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 8,
-        "chat": { "id": "CHAT_ID", "type": "group" }
-      },
-      "data": "admin:set:this:crypto:30:10"
-    }
-  }'
+```json
+{
+  "chatId": "CHAT_ID"
+}
+```
 
-### Test router: simulate clicking the Check group button
-### This calls Telegram getChat/getMe/getChatMember, so it needs a real token and real CHAT_ID.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1008,
-    "callback_query": {
-      "id": "callback-test-5",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 9,
-        "chat": { "id": "CHAT_ID", "type": "group" }
-      },
-      "data": "admin:check:this"
-    }
-  }'
+Expected result includes:
 
-### Test router: simulate clicking the Send test button after picking a group
-### This sends a real Telegram message to the selected group.
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "update_id": 1009,
-    "callback_query": {
-      "id": "callback-test-6",
-      "from": { "id": "ADMIN_USER_ID" },
-      "message": {
-        "message_id": 10,
-        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
-      },
-      "data": "admin:test:CHAT_ID"
-    }
-  }'
+```text
+membership.status
+canPost
+```
 
-### Webhook route: Telegram will POST this shape to your server
-curl -s -X POST http://localhost:3000/webhook/telegram \
-  -H "Content-Type: application/json" \
-  -d '{
-    "update_id": 1001,
-    "message": {
-      "message_id": 2,
-      "chat": { "id": "CHAT_ID", "type": "group" },
-      "text": "/setnews crypto"
-    }
-  }'
+## 9. Send Test Message To Group
 
-### API route: set Telegram webhook
-### Put your public HTTPS base URL in WEBHOOK_URL.
-curl -s -X POST http://localhost:3000/webhook/telegram/set \
-  -H "Content-Type: application/json" \
-  -H "x-admin-chat-id: ADMIN_USER_ID" \
-  -d '{
-    "url": "WEBHOOK_URL/webhook/telegram",
-    "dropPendingUpdates": false
-  }'
+Purpose: Verify the bot can send a real message into the selected group.
 
-### API route: Telegram webhook info
-curl -s http://localhost:3000/webhook/telegram/info \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/group-test-message
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
 
-### API route: delete Telegram webhook if you want to go back to polling
-curl -s -X DELETE http://localhost:3000/webhook/telegram \
-  -H "x-admin-chat-id: ADMIN_USER_ID"
+```json
+{
+  "chatId": "CHAT_ID",
+  "text": "Test message from the news bot."
+}
+```
+
+## 10. Configure News Posting
+
+Purpose: Configure the group to receive news over time.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
+
+```json
+{
+  "chatId": "CHAT_ID",
+  "topic": "crypto",
+  "intervalMinutes": 30,
+  "postLimit": 10,
+  "postNow": false
+}
+```
+
+Allowed topics:
+
+```text
+crypto
+politics
+```
+
+## 11. Configure Politics News
+
+Purpose: Same as above, but politics.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
+
+```json
+{
+  "chatId": "CHAT_ID",
+  "topic": "politics",
+  "intervalMinutes": 60,
+  "postLimit": 5,
+  "postNow": false
+}
+```
+
+## 12. Configure And Post Immediately
+
+Purpose: Save config and immediately send one news item.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
+
+```json
+{
+  "chatId": "CHAT_ID",
+  "topic": "crypto",
+  "intervalMinutes": 30,
+  "postLimit": 3,
+  "postNow": true
+}
+```
+
+## 13. Get All News Configs
+
+Purpose: See all saved group news configs.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+## 14. Get One Group Config
+
+Purpose: See config for one group.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/CHAT_ID
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+## 15. Stop News For Group
+
+Purpose: Disable scheduled posting for a group.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-stop
+Headers:
+  Content-Type: application/json
+  x-admin-chat-id: ADMIN_USER_ID
+Body:
+```
+
+```json
+{
+  "chatId": "CHAT_ID"
+}
+```
+
+## 16. Delete Telegram Webhook
+
+Purpose: Remove webhook if you want to switch back to polling/local development.
+
+```text
+Method: DELETE
+URL: https://tel-news-bot-ivory.vercel.app/webhook/telegram
+Headers:
+  x-admin-chat-id: ADMIN_USER_ID
+Body: none
+```
+
+## Recommended Start Order
+
+1. `GET /health`
+2. `POST /webhook/telegram/set`
+3. `GET /webhook/telegram/info`
+4. Add bot to your Telegram group and make it admin
+5. Send any message in the group, or wait for Telegram `my_chat_member`
+6. `GET /admin/groups`
+7. `POST /admin/group-check`
+8. `POST /admin/group-test-message`
+9. `POST /admin/news-config`
+
+## Replacements
+
+```text
+ADMIN_USER_ID = your Telegram user id from TELEGRAM_ADMIN_CHAT_IDS
+CHAT_ID = the Telegram group id, usually a negative number
+```
