@@ -17,7 +17,7 @@ Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the serv
 On Vercel, also set this environment variable so the bot always knows which group to post into:
 
 ```text
-TELEGRAM_GROUP_CHAT_IDS=-1001234567890|Main News Group
+TELEGRAM_GROUP_CHAT_IDS=-4586389005|Main News Group
 ```
 
 Use the real Telegram group id. Group ids are usually negative numbers.
@@ -118,12 +118,12 @@ Body:
   "update_id": 10030,
   "my_chat_member": {
     "chat": {
-      "id": "CHAT_ID",
+      "id": "-4586389005",
       "type": "group",
       "title": "My Test Group"
     },
     "from": {
-      "id": "ADMIN_USER_ID"
+      "id": "6112214313"
     },
     "old_chat_member": {
       "status": "left"
@@ -135,7 +135,7 @@ Body:
 }
 ```
 
-Use this only to simulate Telegram telling the bot it was added to a group. Replace `CHAT_ID` with the real group id if you know it.
+Use this only to simulate Telegram telling the bot it was added to a group.
 
 ## 7. Test Update Router
 
@@ -155,10 +155,10 @@ Body:
   "message": {
     "message_id": 1,
     "from": {
-      "id": "ADMIN_USER_ID"
+      "id": "6112214313"
     },
     "chat": {
-      "id": "CHAT_ID",
+      "id": "-4586389005",
       "type": "group",
       "title": "My Test Group"
     },
@@ -181,7 +181,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID"
+  "chatId": "-4586389005"
 }
 ```
 
@@ -208,7 +208,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID",
+  "chatId": "-4586389005",
   "text": "Test message from the news bot."
 }
 ```
@@ -229,7 +229,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID",
+  "chatId": "-4586389005",
   "topic": "crypto",
   "intervalMinutes": 30,
   "postLimit": 10,
@@ -258,7 +258,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID",
+  "chatId": "-4586389005",
   "topic": "politics",
   "intervalMinutes": 60,
   "postLimit": 5,
@@ -270,6 +270,8 @@ Body:
 
 Purpose: Save config and immediately send one news item.
 
+Manual immediate posts have a 1-minute cooldown per group. If you trigger another immediate post too soon, the bot will ask you to wait.
+
 ```text
 Method: POST
 URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
@@ -280,7 +282,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID",
+  "chatId": "-4586389005",
   "topic": "crypto",
   "intervalMinutes": 30,
   "postLimit": 3,
@@ -305,7 +307,7 @@ Purpose: See config for one group.
 
 ```text
 Method: GET
-URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/CHAT_ID
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/-4586389005
 Headers: none
 Body: none
 ```
@@ -324,7 +326,7 @@ Body:
 
 ```json
 {
-  "chatId": "CHAT_ID"
+  "chatId": "-4586389005"
 }
 ```
 
@@ -354,6 +356,6 @@ Body: none
 ## Replacements
 
 ```text
-ADMIN_USER_ID = your Telegram user id from TELEGRAM_ADMIN_CHAT_IDS
-CHAT_ID = the Telegram group id, usually a negative number
+ADMIN_USER_ID = 6112214313
+CHAT_ID = -4586389005
 ```

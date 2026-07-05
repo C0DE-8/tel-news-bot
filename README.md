@@ -14,8 +14,8 @@ A Telegram bot that posts real news into groups on a schedule. Each group can ch
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
-TELEGRAM_ADMIN_CHAT_IDS=your_telegram_user_id
-TELEGRAM_GROUP_CHAT_IDS=-1001234567890|Main News Group
+TELEGRAM_ADMIN_CHAT_IDS=6112214313
+TELEGRAM_GROUP_CHAT_IDS=-4586389005|Main News Group
 ```
 
 3. Start the bot:
@@ -38,13 +38,13 @@ Press the bot's `Start` button once to open the button menu. After that, manage 
 
 ```text
 Status
-Latest news
+Send news now
 Admin panel
 Admin ID
 Set news
 Check group
 Send test
-Post now
+Send news now
 Stop
 List configs
 ```
@@ -54,6 +54,7 @@ The bot stores group settings in `backend/data/groups.json`.
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
 The group picker shows groups from `TELEGRAM_GROUP_CHAT_IDS` plus groups the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
+Manual `Send news now` clicks have a 1-minute cooldown per group.
 
 ## HTTP Routes
 

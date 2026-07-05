@@ -6,6 +6,7 @@ const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? path.join("/tmp",
 const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
+const MANUAL_POST_COOLDOWN_MS = 60 * 1000;
 
 const NEWS_TOPICS = {
   crypto: [
@@ -152,6 +153,7 @@ class NewsBot {
       postAt,
       postsSent: payload.resetCount === false ? current.postsSent || 0 : 0,
       enabled,
+      lastManualPostAt: current.lastManualPostAt || null,
       updatedAt: new Date().toISOString(),
     };
     writeJson(GROUPS_FILE, groups);
@@ -163,7 +165,7 @@ class NewsBot {
     }
 
     if (payload.postNow === true && enabled) {
-      await this.postNewsNow(chatId);
+      await this.postNewsNow(chatId, { manual: true });
     }
 
     return groups[chatId];
@@ -320,7 +322,10 @@ class NewsBot {
 
     if (command === "/news") {
       if (!(await this.requireAdmin(message))) return;
-      await this.postNewsNow(chatId);
+      const result = await this.postNewsNow(chatId, { manual: true });
+      if (result?.cooldownRemainingMs) {
+        await this.sendMessage(chatId, `Please wait ${Math.ceil(result.cooldownRemainingMs / 1000)} seconds before posting news again.`);
+      }
       return;
     }
 
@@ -455,7 +460,16 @@ class NewsBot {
       }
 
       if (action === "post") {
-        await this.postNewsNow(targetChatId);
+        const result = await this.postNewsNow(targetChatId, { manual: true });
+        if (result?.cooldownRemainingMs) {
+          const seconds = Math.ceil(result.cooldownRemainingMs / 1000);
+          await this.sendMessage(chatId, `Please wait ${seconds} seconds before posting news again.`, {
+            replyMarkup: adminKeyboard(targetChatId),
+          });
+          await this.answerCallbackQuery(callbackQuery.id, `Wait ${seconds}s.`);
+          return;
+        }
+
         await this.answerCallbackQuery(callbackQuery.id, "Post requested.");
         return;
       }
@@ -518,7 +532,15 @@ class NewsBot {
         return;
       }
 
-      await this.postNewsNow(targetChatId);
+      const result = await this.postNewsNow(targetChatId, { manual: true });
+      if (result?.cooldownRemainingMs) {
+        const seconds = Math.ceil(result.cooldownRemainingMs / 1000);
+        await this.sendMessage(chatId, `Please wait ${seconds} seconds before posting news again.`, {
+          replyMarkup: adminKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, `Wait ${seconds}s.`);
+        return;
+      }
       await this.answerCallbackQuery(callbackQuery.id, "Post requested.");
       return;
     }
@@ -829,7 +851,7 @@ class NewsBot {
     this.groupTimers.delete(chatId);
   }
 
-  async postNewsNow(chatId) {
+  async postNewsNow(chatId, options = {}) {
     const groups = readJson(GROUPS_FILE);
     const group = groups[chatId];
     if (!group?.enabled || !NEWS_TOPICS[group.topic]) {
@@ -848,6 +870,13 @@ class NewsBot {
       return;
     }
 
+    if (options.manual) {
+      const cooldownRemainingMs = getManualPostCooldownRemaining(group);
+      if (cooldownRemainingMs > 0) {
+        return { posted: false, cooldownRemainingMs };
+      }
+    }
+
     const article = await findFreshArticle(chatId, group.topic);
     if (!article) {
       await this.sendMessage(chatId, `I could not find fresh ${group.topic} news right now. I will try again later.`);
@@ -861,6 +890,7 @@ class NewsBot {
     );
 
     group.postsSent = Number(group.postsSent || 0) + 1;
+    if (options.manual) group.lastManualPostAt = new Date().toISOString();
     if (hasReachedPostLimit(group)) {
       group.enabled = false;
       this.clearGroupTimer(chatId);
@@ -868,6 +898,7 @@ class NewsBot {
     group.updatedAt = new Date().toISOString();
     groups[chatId] = group;
     writeJson(GROUPS_FILE, groups);
+    return { posted: true, article };
   }
 
   async sendMessage(chatId, text, options) {
@@ -936,6 +967,15 @@ class NewsBot {
 
 function hasReachedPostLimit(group) {
   return Number.isInteger(group.postLimit) && Number(group.postsSent || 0) >= group.postLimit;
+}
+
+function getManualPostCooldownRemaining(group) {
+  if (!group.lastManualPostAt) return 0;
+
+  const elapsedMs = Date.now() - Date.parse(group.lastManualPostAt);
+  if (!Number.isFinite(elapsedMs)) return 0;
+
+  return Math.max(0, MANUAL_POST_COOLDOWN_MS - elapsedMs);
 }
 
 function normalizePostLimit(value) {
@@ -1049,7 +1089,7 @@ function mainMenuKeyboard(currentChatId) {
     inline_keyboard: [
       [
         { text: "Status", callback_data: `bot:status:${currentChatId}` },
-        { text: "Latest news", callback_data: `bot:news:${currentChatId}` },
+        { text: "Send news now", callback_data: `bot:news:${currentChatId}` },
       ],
       [
         { text: "Admin panel", callback_data: `bot:admin:${currentChatId}` },
@@ -1100,7 +1140,7 @@ function adminKeyboard(targetChatId = "this") {
       ],
       [
         { text: "Status", callback_data: `admin:status:${targetChatId}` },
-        { text: "Post now", callback_data: `admin:post:${targetChatId}` },
+        { text: "Send news now", callback_data: `admin:post:${targetChatId}` },
       ],
       [
         { text: "Check group", callback_data: `admin:check:${targetChatId}` },
