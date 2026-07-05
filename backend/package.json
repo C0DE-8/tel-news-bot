@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js && node --check routes/newsBot.route.js && node --check routes/admin.route.js && node --check routes/webhook.route.js && node --check routes/test.route.js && node --check controllers/admin.controller.js && node --check utils/http.js"
   },
   "keywords": [],
   "author": "",

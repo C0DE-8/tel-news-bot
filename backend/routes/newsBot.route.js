@@ -17,11 +17,12 @@ const NEWS_TOPICS = {
   ],
 };
 
-function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook }) {
+function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminChatIds }) {
   const bot = new NewsBot({
     token,
     defaultIntervalMinutes,
     useWebhook,
+    adminChatIds,
   });
 
   return {
@@ -47,10 +48,11 @@ async function handleRoute(req, res, bot) {
 }
 
 class NewsBot {
-  constructor({ token, defaultIntervalMinutes, useWebhook }) {
+  constructor({ token, defaultIntervalMinutes, useWebhook, adminChatIds }) {
     this.token = token;
     this.defaultIntervalMinutes = defaultIntervalMinutes;
     this.useWebhook = Boolean(useWebhook);
+    this.adminChatIds = parseAdminChatIds(adminChatIds);
     this.offset = 0;
     this.started = false;
     this.groupTimers = new Map();
@@ -86,6 +88,7 @@ class NewsBot {
       mode: this.useWebhook ? "webhook" : "polling",
       activeGroups,
       topics: Object.keys(NEWS_TOPICS),
+      adminRestricted: this.adminChatIds.size > 0,
     };
   }
 
@@ -197,8 +200,10 @@ class NewsBot {
 
   async handleMessage(message) {
     const chatId = String(message.chat.id);
+    const userId = String(message.from?.id || "");
     const text = message.text.trim();
-    const [commandWithBotName, arg] = text.split(/\s+/, 2);
+    const [commandWithBotName, ...args] = text.split(/\s+/);
+    const arg = args[0];
     const command = commandWithBotName.split("@")[0].toLowerCase();
 
     if (!command.startsWith("/")) return;
@@ -211,12 +216,48 @@ class NewsBot {
       return;
     }
 
+    if (command === "/adminhelp") {
+      await this.sendAdminHelp(chatId);
+      return;
+    }
+
+    if (command === "/adminid") {
+      await this.sendMessage(chatId, `Your admin id: ${userId || "unknown"}\nThis chat id: ${chatId}`);
+      return;
+    }
+
+    if (command === "/adminset") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.handleAdminSet(chatId, args);
+      return;
+    }
+
+    if (command === "/adminstop") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.handleAdminStop(chatId, args);
+      return;
+    }
+
+    if (command === "/adminlist") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.handleAdminList(chatId);
+      return;
+    }
+
+    if (command === "/adminstatus") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.handleAdminStatus(chatId, args);
+      return;
+    }
+
     if (command === "/setnews") {
+      if (!(await this.requireAdmin(message))) return;
       await this.setNewsTopic(chatId, arg);
       return;
     }
 
     if (command === "/news") {
+      if (!(await this.requireAdmin(message))) return;
       await this.postNewsNow(chatId);
       return;
     }
@@ -227,13 +268,109 @@ class NewsBot {
     }
 
     if (command === "/setinterval") {
+      if (!(await this.requireAdmin(message))) return;
       await this.setIntervalMinutes(chatId, arg);
       return;
     }
 
     if (command === "/stopnews") {
+      if (!(await this.requireAdmin(message))) return;
       await this.stopNews(chatId);
     }
+  }
+
+  async requireAdmin(message) {
+    if (this.adminChatIds.size === 0) return true;
+
+    const userId = String(message.from?.id || "");
+    if (this.adminChatIds.has(userId)) return true;
+
+    await this.sendMessage(String(message.chat.id), "Only a configured admin can manage this bot.");
+    return false;
+  }
+
+  async sendAdminHelp(chatId) {
+    await this.sendMessage(
+      chatId,
+      [
+        "Admin commands:",
+        "/adminid",
+        "/adminset this crypto 30",
+        "/adminset this politics 60 5",
+        "/adminset CHAT_ID crypto 30 10 2099-01-01T18:00:00.000Z",
+        "/adminset this crypto 30 10 now",
+        "/adminstatus this",
+        "/adminstop this",
+        "/adminlist",
+        "",
+        "Format: /adminset <chatId|this> <topic> <intervalMinutes> [postLimit] [postAt|now]",
+      ].join("\n")
+    );
+  }
+
+  async handleAdminSet(currentChatId, args) {
+    const targetChatId = normalizeTargetChatId(args[0], currentChatId);
+    const topic = args[1];
+    const intervalMinutes = args[2];
+    const postLimit = args[3];
+    const fifthArg = args[4];
+    const postNow = fifthArg === "now" || args.includes("--now");
+    const postAt = postNow ? null : fifthArg;
+
+    try {
+      const group = await this.configureGroup({
+        chatId: targetChatId,
+        topic,
+        intervalMinutes,
+        postLimit,
+        postAt,
+        postNow,
+      });
+
+      await this.sendMessage(
+        currentChatId,
+        [
+          `Saved config for ${targetChatId}.`,
+          `Topic: ${group.topic}`,
+          `Every: ${group.intervalMinutes} minutes`,
+          `Limit: ${group.postLimit || "none"}`,
+          `Start: ${group.postAt || "now"}`,
+          `Posts sent: ${group.postsSent || 0}`,
+        ].join("\n")
+      );
+    } catch (error) {
+      await this.sendMessage(currentChatId, `Admin config failed: ${error.message}\nUse /adminhelp for examples.`);
+    }
+  }
+
+  async handleAdminStop(currentChatId, args) {
+    const targetChatId = normalizeTargetChatId(args[0], currentChatId);
+
+    try {
+      this.disableGroup(targetChatId);
+      await this.sendMessage(currentChatId, `News stopped for ${targetChatId}.`);
+    } catch (error) {
+      await this.sendMessage(currentChatId, `Stop failed: ${error.message}`);
+    }
+  }
+
+  async handleAdminStatus(currentChatId, args) {
+    const targetChatId = normalizeTargetChatId(args[0], currentChatId);
+    const group = this.getGroupConfig(targetChatId);
+
+    if (!group) {
+      await this.sendMessage(currentChatId, `No config found for ${targetChatId}.`);
+      return;
+    }
+
+    await this.sendMessage(currentChatId, formatGroupConfig(targetChatId, group));
+  }
+
+  async handleAdminList(chatId) {
+    const groups = this.listGroupConfigs();
+    const lines = Object.entries(groups).map(([groupChatId, group]) => formatGroupConfig(groupChatId, group));
+
+    await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No group configs saved yet.");
   }
 
   async setNewsTopic(chatId, topic) {
@@ -454,6 +591,32 @@ function throwHttpError(statusCode, message) {
   throw error;
 }
 
+function parseAdminChatIds(value) {
+  return new Set(
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+}
+
+function normalizeTargetChatId(value, currentChatId) {
+  if (!value || value === "this") return currentChatId;
+  return String(value).trim();
+}
+
+function formatGroupConfig(chatId, group) {
+  return [
+    `Chat: ${chatId}`,
+    `Enabled: ${group.enabled ? "yes" : "no"}`,
+    `Topic: ${group.topic || "not set"}`,
+    `Every: ${group.intervalMinutes || "not set"} minutes`,
+    `Limit: ${group.postLimit || "none"}`,
+    `Start: ${group.postAt || "now"}`,
+    `Posts sent: ${group.postsSent || 0}`,
+  ].join("\n");
+}
+
 async function findFreshArticle(chatId, topic) {
   const posted = readJson(POSTED_FILE);
   posted[chatId] ||= [];
@@ -550,11 +713,6 @@ function readJson(filePath) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { "content-type": "application/json" });
-  res.end(JSON.stringify(payload));
 }
 
 function sleep(ms) {

@@ -15,6 +15,7 @@ const newsBotRoute = createNewsBotRoute({
   token: process.env.TELEGRAM_BOT_TOKEN,
   defaultIntervalMinutes: Number(process.env.POST_INTERVAL_MINUTES || 30),
   useWebhook: process.env.TELEGRAM_USE_WEBHOOK === "true",
+  adminChatIds: process.env.TELEGRAM_ADMIN_CHAT_IDS,
 });
 const adminController = createAdminController({ bot: newsBotRoute.bot });
 const adminRoute = createAdminRoute({ controller: adminController });
@@ -62,6 +63,11 @@ const server = http.createServer(async (req, res) => {
       "POST /webhook/telegram",
       "GET /test/ping",
       "POST /test/update",
+      "Telegram /adminhelp",
+      "Telegram /adminid",
+      "Telegram /adminset",
+      "Telegram /adminstop",
+      "Telegram /adminlist",
     ],
   });
 });

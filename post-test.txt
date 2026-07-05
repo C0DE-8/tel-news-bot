@@ -1,0 +1,127 @@
+# Local API test examples
+#
+# Start the server first:
+# cd backend
+# npm start
+#
+# Default local URL:
+BASE_URL=http://localhost:3000
+
+### Health
+curl -s http://localhost:3000/health
+
+### Bot runtime status
+curl -s http://localhost:3000/bot/status
+
+### Test router ping
+curl -s http://localhost:3000/test/ping
+
+### Admin: list every group config
+curl -s http://localhost:3000/admin/news-config
+
+### Admin: configure a group to post crypto news every 30 minutes
+### Replace CHAT_ID with your Telegram group chat id.
+curl -s -X POST http://localhost:3000/admin/news-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "CHAT_ID",
+    "topic": "crypto",
+    "intervalMinutes": 30,
+    "postLimit": 10,
+    "postNow": false
+  }'
+
+### Admin: configure politics news to start at a specific time
+### postAt accepts any valid ISO date string.
+curl -s -X POST http://localhost:3000/admin/news-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "CHAT_ID",
+    "topic": "politics",
+    "intervalMinutes": 60,
+    "postLimit": 5,
+    "postAt": "2099-01-01T18:00:00.000Z"
+  }'
+
+### Admin: post one item immediately after saving config
+curl -s -X POST http://localhost:3000/admin/news-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "CHAT_ID",
+    "topic": "crypto",
+    "intervalMinutes": 30,
+    "postLimit": 3,
+    "postNow": true
+  }'
+
+### Admin: stop news for a group
+curl -s -X POST http://localhost:3000/admin/news-stop \
+  -H "Content-Type: application/json" \
+  -d '{"chatId":"CHAT_ID"}'
+
+### Admin: get one group config
+curl -s http://localhost:3000/admin/news-config/CHAT_ID
+
+### Test router: simulate a Telegram /status update locally
+### This calls the same handler used by Telegram updates.
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1000,
+    "message": {
+      "message_id": 1,
+      "chat": { "id": "CHAT_ID", "type": "group" },
+      "text": "/status"
+    }
+  }'
+
+### Test router: get your admin id helper response shape
+### Replace ADMIN_USER_ID with the Telegram user id allowed in TELEGRAM_ADMIN_CHAT_IDS.
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1002,
+    "message": {
+      "message_id": 3,
+      "from": { "id": "ADMIN_USER_ID" },
+      "chat": { "id": "CHAT_ID", "type": "private" },
+      "text": "/adminid"
+    }
+  }'
+
+### Test router: simulate Telegram admin setting current group news
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1003,
+    "message": {
+      "message_id": 4,
+      "from": { "id": "ADMIN_USER_ID" },
+      "chat": { "id": "CHAT_ID", "type": "group" },
+      "text": "/adminset this crypto 30 10"
+    }
+  }'
+
+### Webhook route: Telegram will POST this shape to your server
+curl -s -X POST http://localhost:3000/webhook/telegram \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1001,
+    "message": {
+      "message_id": 2,
+      "chat": { "id": "CHAT_ID", "type": "group" },
+      "text": "/setnews crypto"
+    }
+  }'
+
+### Telegram webhook setup
+### 1. Put your live public HTTPS URL in WEBHOOK_URL.
+### 2. Put your bot token in TELEGRAM_BOT_TOKEN.
+### 3. Set TELEGRAM_USE_WEBHOOK=true in backend/.env before starting the server.
+curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/setWebhook?url=WEBHOOK_URL/webhook/telegram"
+
+### Telegram webhook info
+curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/getWebhookInfo"
+
+### Telegram delete webhook if you want to go back to polling
+curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/deleteWebhook"
