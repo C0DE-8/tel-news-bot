@@ -16,6 +16,7 @@ POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=6112214313
 TELEGRAM_GROUP_CHAT_IDS=-4586389005|Main News Group
+CRON_SECRET=
 ```
 
 3. Start the bot:
@@ -55,6 +56,8 @@ If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settin
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
 The group picker shows groups from `TELEGRAM_GROUP_CHAT_IDS` plus groups the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
 Manual `Send news now` clicks have a 1-minute cooldown per group.
+On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a group is due.
+Admin controls and posting feedback go to the private admin chat. Groups only receive news posts and test messages.
 
 ## HTTP Routes
 
@@ -74,6 +77,8 @@ POST /webhook/telegram/set
 GET /webhook/telegram/info
 DELETE /webhook/telegram
 POST /webhook/telegram/delete
+GET /cron/post-news
+POST /cron/post-news
 GET /test/ping
 POST /test/update
 ```

@@ -54,6 +54,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/cron/post-news") {
+    if (req.method !== "GET" && req.method !== "POST") {
+      sendJson(res, 405, { ok: false, error: "Method not allowed" });
+      return;
+    }
+
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const suppliedSecret = req.headers["x-cron-secret"] || url.searchParams.get("secret");
+      if (suppliedSecret !== cronSecret) {
+        sendJson(res, 401, { ok: false, error: "Invalid cron secret" });
+        return;
+      }
+    }
+
+    try {
+      const result = await newsBotRoute.bot.runDuePosts();
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error.message });
+    }
+    return;
+  }
+
   sendJson(res, 200, {
     ok: true,
     service: "Telegram news bot",
@@ -73,6 +98,8 @@ const server = http.createServer(async (req, res) => {
       "GET /webhook/telegram/info",
       "DELETE /webhook/telegram",
       "POST /webhook/telegram/delete",
+      "GET /cron/post-news",
+      "POST /cron/post-news",
       "GET /test/ping",
       "POST /test/update",
       "Telegram /adminhelp",

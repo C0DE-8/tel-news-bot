@@ -7,6 +7,7 @@ const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
 const MANUAL_POST_COOLDOWN_MS = 60 * 1000;
+const SCHEDULED_POST_COOLDOWN_MS = 60 * 1000;
 
 const NEWS_TOPICS = {
   crypto: [
@@ -81,7 +82,11 @@ class NewsBot {
     }
 
     ensureDataFiles();
-    this.restoreScheduledPosts();
+    if (process.env.VERCEL) {
+      console.log("Vercel runtime detected. Scheduled posts use /cron/post-news.");
+    } else {
+      this.restoreScheduledPosts();
+    }
 
     if (this.useWebhook) {
       console.log("Telegram webhook mode enabled.");
@@ -102,6 +107,7 @@ class NewsBot {
       activeGroups,
       topics: Object.keys(NEWS_TOPICS),
       adminRestricted: this.adminChatIds.size > 0,
+      scheduler: process.env.VERCEL ? "cron-route" : "local-timer",
     };
   }
 
@@ -154,6 +160,8 @@ class NewsBot {
       postsSent: payload.resetCount === false ? current.postsSent || 0 : 0,
       enabled,
       lastManualPostAt: current.lastManualPostAt || null,
+      lastScheduledPostAt: current.lastScheduledPostAt || null,
+      lastScheduledAttemptAt: current.lastScheduledAttemptAt || null,
       updatedAt: new Date().toISOString(),
     };
     writeJson(GROUPS_FILE, groups);
@@ -167,6 +175,18 @@ class NewsBot {
     if (payload.postNow === true && enabled) {
       await this.postNewsNow(chatId, { manual: true });
     }
+
+    await this.sendAdminUpdate(
+      [
+        "News config saved.",
+        `Group: ${chatId}`,
+        `Topic: ${topic}`,
+        `Every: ${intervalMinutes} minutes`,
+        `Limit: ${postLimit || "none"}`,
+        process.env.VERCEL ? "Scheduler: Vercel cron route /cron/post-news" : "Scheduler: local timer",
+      ].join("\n"),
+      { replyMarkup: adminKeyboard(chatId) }
+    );
 
     return groups[chatId];
   }
@@ -262,6 +282,11 @@ class NewsBot {
 
     if (!command.startsWith("/")) return;
 
+    if (isGroupChatType(message.chat.type)) {
+      await this.sendAdminUpdate(`Ignored group command ${command} in ${chatLabel(message.chat)}. Manage the bot from your private admin chat.`);
+      return;
+    }
+
     if (command === "/start" || command === "/help") {
       await this.sendMainMenu(chatId);
       return;
@@ -353,6 +378,12 @@ class NewsBot {
 
     if (!chatId || (!data.startsWith("admin:") && !data.startsWith("bot:"))) {
       await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
+      return;
+    }
+
+    if (isGroupChatType(message?.chat?.type)) {
+      await this.answerCallbackQuery(callbackQuery.id, "Use the private bot chat.");
+      await this.sendAdminUpdate(`Ignored group button click in ${chatLabel(message.chat)}. Controls only work in the private admin chat.`);
       return;
     }
 
@@ -515,7 +546,7 @@ class NewsBot {
         return;
       }
 
-      await this.sendChatStatus(targetChatId);
+      await this.sendChatStatus(chatId, targetChatId);
       await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
       return;
     }
@@ -575,6 +606,21 @@ class NewsBot {
 
     await this.sendMessage(String(message.chat.id), "Only a configured admin can manage this bot.");
     return false;
+  }
+
+  getAdminNotificationChatId() {
+    return [...this.adminChatIds][0] || null;
+  }
+
+  async sendAdminUpdate(text, options) {
+    const adminChatId = this.getAdminNotificationChatId();
+    if (!adminChatId) return;
+
+    try {
+      await this.sendMessage(adminChatId, text, options);
+    } catch (error) {
+      console.error("Failed sending admin update:", error.message);
+    }
   }
 
   async sendAdminHelp(chatId, includeButtons = false) {
@@ -710,11 +756,8 @@ class NewsBot {
     writeJson(GROUPS_FILE, groups);
 
     this.scheduleGroup(chatId, groups[chatId]);
-    await this.sendMessage(
-      chatId,
-      `News topic set to ${normalizedTopic}. I will post every ${groups[chatId].intervalMinutes} minutes.`
-    );
-    await this.postNewsNow(chatId);
+    await this.sendAdminUpdate(`News topic set for ${chatId}: ${normalizedTopic}.`);
+    await this.postNewsNow(chatId, { manual: true });
   }
 
   async setIntervalMinutes(chatId, minutesValue) {
@@ -740,21 +783,23 @@ class NewsBot {
     writeJson(GROUPS_FILE, groups);
 
     this.scheduleGroup(chatId, groups[chatId]);
-    await this.sendMessage(chatId, `Posting interval set to ${minutes} minutes.`);
+    await this.sendAdminUpdate(`Posting interval set for ${chatId}: ${minutes} minutes.`);
   }
 
-  async sendChatStatus(chatId) {
+  async sendChatStatus(outputChatId, targetChatId = outputChatId) {
     const groups = readJson(GROUPS_FILE);
-    const group = groups[chatId];
+    const group = groups[targetChatId];
 
     if (!group || !group.enabled) {
-      await this.sendMessage(chatId, "News posting is not active. Open the admin panel and choose Set news.", {
-        replyMarkup: mainMenuKeyboard(chatId),
+      await this.sendMessage(outputChatId, `News posting is not active for ${targetChatId}. Open the admin panel and choose Set news.`, {
+        replyMarkup: adminKeyboard(targetChatId),
       });
       return;
     }
 
-    await this.sendMessage(chatId, `Active topic: ${group.topic}\nInterval: ${group.intervalMinutes} minutes`);
+    await this.sendMessage(outputChatId, formatGroupConfig(targetChatId, group), {
+      replyMarkup: adminKeyboard(targetChatId),
+    });
   }
 
   async checkGroupAccess(chatId) {
@@ -792,6 +837,66 @@ class NewsBot {
     };
   }
 
+  async runDuePosts(now = new Date()) {
+    ensureDataFiles();
+    const groups = readJson(GROUPS_FILE);
+    const summary = {
+      ok: true,
+      checkedAt: now.toISOString(),
+      checked: 0,
+      posted: 0,
+      skipped: 0,
+      errors: [],
+    };
+
+    for (const [chatId, group] of Object.entries(groups)) {
+      summary.checked += 1;
+
+      if (!group.enabled || !NEWS_TOPICS[group.topic]) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const due = getScheduleDueState(group, now);
+      if (!due.ready) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      groups[chatId] = {
+        ...group,
+        lastScheduledAttemptAt: now.toISOString(),
+      };
+      writeJson(GROUPS_FILE, groups);
+
+      try {
+        const result = await this.postNewsNow(chatId, { scheduled: true, now });
+        if (result?.posted) {
+          summary.posted += 1;
+        } else {
+          summary.skipped += 1;
+        }
+      } catch (error) {
+        summary.errors.push({ chatId, error: error.message });
+        await this.sendAdminUpdate(`Scheduled post failed for ${chatId}: ${error.message}`);
+      }
+    }
+
+    if (summary.posted || summary.errors.length) {
+      await this.sendAdminUpdate(
+        [
+          "Cron post check finished.",
+          `Checked: ${summary.checked}`,
+          `Posted: ${summary.posted}`,
+          `Skipped: ${summary.skipped}`,
+          `Errors: ${summary.errors.length}`,
+        ].join("\n")
+      );
+    }
+
+    return summary;
+  }
+
   async stopNews(chatId) {
     const groups = readJson(GROUPS_FILE);
     if (groups[chatId]) {
@@ -801,7 +906,7 @@ class NewsBot {
     }
 
     this.clearGroupTimer(chatId);
-    await this.sendMessage(chatId, "News posting stopped for this chat.");
+    await this.sendAdminUpdate(`News posting stopped for ${chatId}.`);
   }
 
   restoreScheduledPosts() {
@@ -852,21 +957,25 @@ class NewsBot {
   }
 
   async postNewsNow(chatId, options = {}) {
+    const normalizedChatId = String(chatId);
     const groups = readJson(GROUPS_FILE);
-    const group = groups[chatId];
+    const group = groups[normalizedChatId];
     if (!group?.enabled || !NEWS_TOPICS[group.topic]) {
-      await this.sendMessage(chatId, "Set a topic first from the admin panel.", {
-        replyMarkup: adminKeyboard(chatId),
-      });
+      if (!options.silentNoConfig) {
+        await this.sendAdminUpdate(`No active news config found for ${normalizedChatId}.`, {
+          replyMarkup: adminKeyboard(normalizedChatId),
+        });
+      }
       return;
     }
 
     if (hasReachedPostLimit(group)) {
       group.enabled = false;
       group.updatedAt = new Date().toISOString();
-      groups[chatId] = group;
+      groups[normalizedChatId] = group;
       writeJson(GROUPS_FILE, groups);
-      this.clearGroupTimer(chatId);
+      this.clearGroupTimer(normalizedChatId);
+      await this.sendAdminUpdate(`Post limit reached. News stopped for ${normalizedChatId}.`);
       return;
     }
 
@@ -877,27 +986,40 @@ class NewsBot {
       }
     }
 
-    const article = await findFreshArticle(chatId, group.topic);
+    const article = await findFreshArticle(normalizedChatId, group.topic);
     if (!article) {
-      await this.sendMessage(chatId, `I could not find fresh ${group.topic} news right now. I will try again later.`);
+      await this.sendAdminUpdate(`No fresh ${group.topic} news found for ${normalizedChatId}. I will try again later.`);
       return;
     }
 
     await this.sendMessage(
-      chatId,
+      normalizedChatId,
       `<b>${escapeHtml(article.title)}</b>\n\n${escapeHtml(article.source)}\n${escapeHtml(article.link)}`,
       "HTML"
     );
 
     group.postsSent = Number(group.postsSent || 0) + 1;
     if (options.manual) group.lastManualPostAt = new Date().toISOString();
+    if (options.scheduled) group.lastScheduledPostAt = (options.now || new Date()).toISOString();
     if (hasReachedPostLimit(group)) {
       group.enabled = false;
-      this.clearGroupTimer(chatId);
+      this.clearGroupTimer(normalizedChatId);
     }
     group.updatedAt = new Date().toISOString();
-    groups[chatId] = group;
+    groups[normalizedChatId] = group;
     writeJson(GROUPS_FILE, groups);
+
+    await this.sendAdminUpdate(
+      [
+        `${options.scheduled ? "Scheduled" : options.manual ? "Manual" : "News"} post sent.`,
+        `Group: ${normalizedChatId}`,
+        `Topic: ${group.topic}`,
+        `Title: ${article.title}`,
+        group.enabled ? `Posts sent: ${group.postsSent}` : "Post limit reached. News stopped.",
+      ].join("\n"),
+      { replyMarkup: adminKeyboard(normalizedChatId) }
+    );
+
     return { posted: true, article };
   }
 
@@ -978,6 +1100,32 @@ function getManualPostCooldownRemaining(group) {
   return Math.max(0, MANUAL_POST_COOLDOWN_MS - elapsedMs);
 }
 
+function getScheduleDueState(group, now) {
+  if (group.postAt && Date.parse(group.postAt) > now.getTime()) {
+    return { ready: false, reason: "waiting_for_start_time" };
+  }
+
+  if (group.lastScheduledAttemptAt) {
+    const attemptElapsedMs = now.getTime() - Date.parse(group.lastScheduledAttemptAt);
+    if (Number.isFinite(attemptElapsedMs) && attemptElapsedMs < SCHEDULED_POST_COOLDOWN_MS) {
+      return { ready: false, reason: "attempt_cooldown" };
+    }
+  }
+
+  const intervalMs = Math.max(5, group.intervalMinutes || 30) * 60 * 1000;
+  const lastRunTime = latestTimestamp(group.lastScheduledPostAt, group.lastScheduledAttemptAt, group.updatedAt);
+  if (Number.isFinite(lastRunTime) && now.getTime() - lastRunTime < intervalMs) {
+    return { ready: false, reason: "interval_not_due" };
+  }
+
+  return { ready: true, reason: "due" };
+}
+
+function latestTimestamp(...values) {
+  const timestamps = values.map((value) => Date.parse(value || 0)).filter(Number.isFinite);
+  return timestamps.length ? Math.max(...timestamps) : 0;
+}
+
 function normalizePostLimit(value) {
   if (value === undefined || value === null || value === "") return null;
 
@@ -1048,6 +1196,11 @@ function isLikelyGroupChatId(chatId) {
 
 function formatChatLabel(chat) {
   return `${chat.title || chat.username || chat.id} (${chat.id})`;
+}
+
+function chatLabel(chat) {
+  if (!chat) return "unknown chat";
+  return `${chat.title || chat.username || chat.first_name || chat.id} (${chat.id})`;
 }
 
 function formatGroupConfig(chatId, group) {
@@ -1213,15 +1366,48 @@ async function findFreshArticle(chatId, topic) {
   }
 
   const freshArticles = articles
-    .filter((article) => article.title && article.link && !seen.has(article.link))
+    .map((article) => ({
+      ...article,
+      fingerprints: articleFingerprints(article),
+    }))
+    .filter((article) => article.title && article.link && !seen.has(article.link) && !article.fingerprints.some((fingerprint) => seen.has(fingerprint)))
     .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
 
   const article = freshArticles[0];
   if (!article) return null;
 
-  posted[chatId] = [article.link, ...posted[chatId]].slice(0, 100);
+  posted[chatId] = [article.link, ...article.fingerprints, ...posted[chatId]].slice(0, 200);
   writeJson(POSTED_FILE, posted);
   return article;
+}
+
+function articleFingerprints(article) {
+  return [
+    normalizeArticleLink(article.link) ? `url:${normalizeArticleLink(article.link)}` : null,
+    normalizeArticleTitle(article.title) ? `title:${normalizeArticleTitle(article.title)}` : null,
+  ].filter(Boolean);
+}
+
+function normalizeArticleLink(link) {
+  try {
+    const url = new URL(String(link || "").trim());
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|fbclid|gclid|mc_)/i.test(key)) url.searchParams.delete(key);
+    }
+    return `${url.hostname}${url.pathname}${url.search}`.toLowerCase().replace(/\/$/, "");
+  } catch {
+    return String(link || "").trim().toLowerCase();
+  }
+}
+
+function normalizeArticleTitle(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 async function fetchRss(feedUrl) {

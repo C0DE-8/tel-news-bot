@@ -13,6 +13,7 @@ Content-Type: application/json
 ```
 
 Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
+Scheduled posting on Vercel uses `/cron/post-news`. If you set `CRON_SECRET` on the server, pass the same value as `?secret=...` or `x-cron-secret`; if you leave `CRON_SECRET` empty, no cron header is needed.
 
 On Vercel, also set this environment variable so the bot always knows which group to post into:
 
@@ -290,7 +291,39 @@ Body:
 }
 ```
 
-## 13. Get All News Configs
+## 13. Run Scheduled Post Check
+
+Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group and only posts when the group's interval is due.
+
+Important: Vercel/serverless does not keep `setInterval` running after a request ends. This route is what makes scheduled posting work on the live URL.
+
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/cron/post-news
+Headers: none
+Body: none
+```
+
+Expected shape:
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-07-04T00:00:00.000Z",
+  "checked": 1,
+  "posted": 0,
+  "skipped": 1,
+  "errors": []
+}
+```
+
+If you set `CRON_SECRET`, use:
+
+```text
+URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
+```
+
+## 14. Get All News Configs
 
 Purpose: See all saved group news configs.
 
@@ -301,7 +334,7 @@ Headers: none
 Body: none
 ```
 
-## 14. Get One Group Config
+## 15. Get One Group Config
 
 Purpose: See config for one group.
 
@@ -312,7 +345,7 @@ Headers: none
 Body: none
 ```
 
-## 15. Stop News For Group
+## 16. Stop News For Group
 
 Purpose: Disable scheduled posting for a group.
 
@@ -330,7 +363,7 @@ Body:
 }
 ```
 
-## 16. Delete Telegram Webhook
+## 17. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 
@@ -352,6 +385,7 @@ Body: none
 7. `POST /admin/group-check`
 8. `POST /admin/group-test-message`
 9. `POST /admin/news-config`
+10. `GET /cron/post-news`
 
 ## Replacements
 
