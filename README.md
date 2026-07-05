@@ -44,17 +44,12 @@ Use these commands inside the group where the bot was added:
 /stopnews
 /adminpanel
 /adminid
-/adminhelp
-/adminset this crypto 30
-/adminset this politics 60 5
-/adminstop this
-/adminlist
 ```
 
 The bot stores group settings in `backend/data/groups.json`.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
-Use `/adminid` in Telegram to see your user id and the current chat id.
+Use `/adminid` in Telegram to see your user id and the current chat id. Use `/adminpanel` to manage the bot with buttons.
 
 ## HTTP Routes
 
@@ -66,6 +61,10 @@ GET /admin/news-config/:chatId
 POST /admin/news-config
 POST /admin/news-stop
 POST /webhook/telegram
+POST /webhook/telegram/set
+GET /webhook/telegram/info
+DELETE /webhook/telegram
+POST /webhook/telegram/delete
 GET /test/ping
 POST /test/update
 ```

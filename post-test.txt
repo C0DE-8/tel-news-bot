@@ -92,7 +92,7 @@ curl -s -X POST http://localhost:3000/test/update \
     }
   }'
 
-### Test router: simulate Telegram admin setting current group news
+### Test router: simulate opening the Telegram admin button panel
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
   -d '{
@@ -101,52 +101,71 @@ curl -s -X POST http://localhost:3000/test/update \
       "message_id": 4,
       "from": { "id": "ADMIN_USER_ID" },
       "chat": { "id": "CHAT_ID", "type": "group" },
-      "text": "/adminset this crypto 30 10"
-    }
-  }'
-
-### Test router: simulate opening the Telegram admin button panel
-curl -s -X POST http://localhost:3000/test/update \
-  -H "Content-Type: application/json" \
-  -d '{
-    "update_id": 1004,
-    "message": {
-      "message_id": 5,
-      "from": { "id": "ADMIN_USER_ID" },
-      "chat": { "id": "CHAT_ID", "type": "group" },
       "text": "/adminpanel"
     }
   }'
 
-### Test router: simulate clicking the Status inline button
+### Test router: button step 1, click Set news
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1004,
+    "callback_query": {
+      "id": "callback-test-1",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 5,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:configure:this"
+    }
+  }'
+
+### Test router: button step 2, choose Crypto
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
   -d '{
     "update_id": 1005,
     "callback_query": {
-      "id": "callback-test-1",
+      "id": "callback-test-2",
       "from": { "id": "ADMIN_USER_ID" },
       "message": {
         "message_id": 6,
         "chat": { "id": "CHAT_ID", "type": "group" }
       },
-      "data": "admin:status:this"
+      "data": "admin:topic:this:crypto"
     }
   }'
 
-### Test router: simulate clicking the Crypto every 30m inline button
+### Test router: button step 3, choose 30 minutes
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
   -d '{
     "update_id": 1006,
     "callback_query": {
-      "id": "callback-test-2",
+      "id": "callback-test-3",
       "from": { "id": "ADMIN_USER_ID" },
       "message": {
         "message_id": 7,
         "chat": { "id": "CHAT_ID", "type": "group" }
       },
-      "data": "admin:set:this:crypto:30"
+      "data": "admin:interval:this:crypto:30"
+    }
+  }'
+
+### Test router: button step 4, save with 10 post limit
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1007,
+    "callback_query": {
+      "id": "callback-test-4",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 8,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:set:this:crypto:30:10"
     }
   }'
 
@@ -162,14 +181,17 @@ curl -s -X POST http://localhost:3000/webhook/telegram \
     }
   }'
 
-### Telegram webhook setup
-### 1. Put your live public HTTPS URL in WEBHOOK_URL.
-### 2. Put your bot token in TELEGRAM_BOT_TOKEN.
-### 3. Set TELEGRAM_USE_WEBHOOK=true in backend/.env before starting the server.
-curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/setWebhook?url=WEBHOOK_URL/webhook/telegram"
+### API route: set Telegram webhook
+### Put your public HTTPS base URL in WEBHOOK_URL.
+curl -s -X POST http://localhost:3000/webhook/telegram/set \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "WEBHOOK_URL/webhook/telegram",
+    "dropPendingUpdates": false
+  }'
 
-### Telegram webhook info
-curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/getWebhookInfo"
+### API route: Telegram webhook info
+curl -s http://localhost:3000/webhook/telegram/info
 
-### Telegram delete webhook if you want to go back to polling
-curl -s "https://api.telegram.org/botTELEGRAM_BOT_TOKEN/deleteWebhook"
+### API route: delete Telegram webhook if you want to go back to polling
+curl -s -X DELETE http://localhost:3000/webhook/telegram

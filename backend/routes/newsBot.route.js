@@ -222,6 +222,7 @@ class NewsBot {
     }
 
     if (command === "/adminhelp" || command === "/adminpanel") {
+      if (!(await this.requireAdmin(message))) return;
       await this.sendAdminHelp(chatId, true);
       return;
     }
@@ -304,8 +305,32 @@ class NewsBot {
 
     try {
       if (action === "panel") {
-        await this.sendAdminHelp(chatId, true);
+        await this.sendAdminPanel(chatId);
         await this.answerCallbackQuery(callbackQuery.id, "Panel opened.");
+        return;
+      }
+
+      if (action === "configure") {
+        await this.sendMessage(chatId, "Pick the news topic for this chat.", {
+          replyMarkup: topicKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Choose topic.");
+        return;
+      }
+
+      if (action === "topic") {
+        await this.sendMessage(chatId, `Topic selected: ${topic}\nPick how often to post.`, {
+          replyMarkup: intervalKeyboard(targetChatId, topic),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Choose interval.");
+        return;
+      }
+
+      if (action === "interval") {
+        await this.sendMessage(chatId, `Interval selected: ${intervalMinutes} minutes\nPick how many posts to send.`, {
+          replyMarkup: limitKeyboard(targetChatId, topic, intervalMinutes),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Choose limit.");
         return;
       }
 
@@ -317,7 +342,7 @@ class NewsBot {
           postLimit,
         });
         await this.sendMessage(chatId, `Saved from button.\n${formatGroupConfig(targetChatId, group)}`, {
-          replyMarkup: adminKeyboard(),
+          replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Saved.");
         return;
@@ -326,7 +351,7 @@ class NewsBot {
       if (action === "status") {
         const group = this.getGroupConfig(targetChatId);
         await this.sendMessage(chatId, group ? formatGroupConfig(targetChatId, group) : `No config found for ${targetChatId}.`, {
-          replyMarkup: adminKeyboard(),
+          replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
         return;
@@ -341,7 +366,7 @@ class NewsBot {
       if (action === "stop") {
         this.disableGroup(targetChatId);
         await this.sendMessage(chatId, `News stopped for ${targetChatId}.`, {
-          replyMarkup: adminKeyboard(),
+          replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Stopped.");
         return;
@@ -356,7 +381,7 @@ class NewsBot {
       await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
     } catch (error) {
       await this.sendMessage(chatId, `Button action failed: ${error.message}`, {
-        replyMarkup: adminKeyboard(),
+        replyMarkup: adminKeyboard(targetChatId),
       });
       await this.answerCallbackQuery(callbackQuery.id, "Action failed.");
     }
@@ -376,21 +401,18 @@ class NewsBot {
     await this.sendMessage(
       chatId,
       [
-        "Admin commands:",
-        "/adminpanel",
-        "/adminid",
-        "/adminset this crypto 30",
-        "/adminset this politics 60 5",
-        "/adminset CHAT_ID crypto 30 10 2099-01-01T18:00:00.000Z",
-        "/adminset this crypto 30 10 now",
-        "/adminstatus this",
-        "/adminstop this",
-        "/adminlist",
-        "",
-        "Format: /adminset <chatId|this> <topic> <intervalMinutes> [postLimit] [postAt|now]",
+        "Admin panel:",
+        "Use the buttons below to manage this chat.",
+        "Use /adminid only when you need to find your admin id.",
       ].join("\n"),
-      includeButtons ? { replyMarkup: adminKeyboard() } : undefined
+      includeButtons ? { replyMarkup: adminKeyboard(chatId) } : undefined
     );
+  }
+
+  async sendAdminPanel(chatId) {
+    await this.sendMessage(chatId, "Admin panel\nChoose an action.", {
+      replyMarkup: adminKeyboard(chatId),
+    });
   }
 
   async handleAdminSet(currentChatId, args) {
@@ -651,6 +673,26 @@ class NewsBot {
 
     return data;
   }
+
+  setWebhook(url, options = {}) {
+    if (!url) throwHttpError(400, "url is required");
+
+    return this.telegram("setWebhook", {
+      url,
+      allowed_updates: options.allowedUpdates || ["message", "callback_query"],
+      drop_pending_updates: options.dropPendingUpdates === true,
+    });
+  }
+
+  getWebhookInfo() {
+    return this.telegram("getWebhookInfo", {});
+  }
+
+  deleteWebhook(dropPendingUpdates = false) {
+    return this.telegram("deleteWebhook", {
+      drop_pending_updates: dropPendingUpdates === true,
+    });
+  }
 }
 
 function hasReachedPostLimit(group) {
@@ -711,25 +753,64 @@ function formatGroupConfig(chatId, group) {
   ].join("\n");
 }
 
-function adminKeyboard() {
+function adminKeyboard(targetChatId = "this") {
   return {
     inline_keyboard: [
       [
-        { text: "Crypto every 30m", callback_data: "admin:set:this:crypto:30" },
-        { text: "Politics every 30m", callback_data: "admin:set:this:politics:30" },
+        { text: "Set news", callback_data: `admin:configure:${targetChatId}` },
       ],
       [
-        { text: "Crypto 10 posts", callback_data: "admin:set:this:crypto:30:10" },
-        { text: "Politics 10 posts", callback_data: "admin:set:this:politics:30:10" },
+        { text: "Status", callback_data: `admin:status:${targetChatId}` },
+        { text: "Post now", callback_data: `admin:post:${targetChatId}` },
       ],
       [
-        { text: "Status", callback_data: "admin:status:this" },
-        { text: "Post now", callback_data: "admin:post:this" },
-      ],
-      [
-        { text: "Stop", callback_data: "admin:stop:this" },
+        { text: "Stop", callback_data: `admin:stop:${targetChatId}` },
         { text: "List configs", callback_data: "admin:list" },
       ],
+    ],
+  };
+}
+
+function topicKeyboard(targetChatId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Crypto", callback_data: `admin:topic:${targetChatId}:crypto` },
+        { text: "Politics", callback_data: `admin:topic:${targetChatId}:politics` },
+      ],
+      [{ text: "Back", callback_data: `admin:panel:${targetChatId}` }],
+    ],
+  };
+}
+
+function intervalKeyboard(targetChatId, topic) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "15 min", callback_data: `admin:interval:${targetChatId}:${topic}:15` },
+        { text: "30 min", callback_data: `admin:interval:${targetChatId}:${topic}:30` },
+      ],
+      [
+        { text: "1 hour", callback_data: `admin:interval:${targetChatId}:${topic}:60` },
+        { text: "3 hours", callback_data: `admin:interval:${targetChatId}:${topic}:180` },
+      ],
+      [{ text: "Back", callback_data: `admin:configure:${targetChatId}` }],
+    ],
+  };
+}
+
+function limitKeyboard(targetChatId, topic, intervalMinutes) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "No limit", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}` },
+        { text: "5 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:5` },
+      ],
+      [
+        { text: "10 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:10` },
+        { text: "25 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:25` },
+      ],
+      [{ text: "Back", callback_data: `admin:topic:${targetChatId}:${topic}` }],
     ],
   };
 }
