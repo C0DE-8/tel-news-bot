@@ -24,6 +24,13 @@ cd backend
 npm start
 ```
 
+For development with nodemon:
+
+```bash
+cd backend
+npm run dev
+```
+
 ## Telegram Commands
 
 Use these commands inside the group where the bot was added:
@@ -35,6 +42,7 @@ Use these commands inside the group where the bot was added:
 /status
 /setinterval 30
 /stopnews
+/adminpanel
 /adminid
 /adminhelp
 /adminset this crypto 30

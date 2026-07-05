@@ -4,6 +4,9 @@
 # cd backend
 # npm start
 #
+# Or with nodemon:
+# npm run dev
+#
 # Default local URL:
 BASE_URL=http://localhost:3000
 
@@ -99,6 +102,51 @@ curl -s -X POST http://localhost:3000/test/update \
       "from": { "id": "ADMIN_USER_ID" },
       "chat": { "id": "CHAT_ID", "type": "group" },
       "text": "/adminset this crypto 30 10"
+    }
+  }'
+
+### Test router: simulate opening the Telegram admin button panel
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1004,
+    "message": {
+      "message_id": 5,
+      "from": { "id": "ADMIN_USER_ID" },
+      "chat": { "id": "CHAT_ID", "type": "group" },
+      "text": "/adminpanel"
+    }
+  }'
+
+### Test router: simulate clicking the Status inline button
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1005,
+    "callback_query": {
+      "id": "callback-test-1",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 6,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:status:this"
+    }
+  }'
+
+### Test router: simulate clicking the Crypto every 30m inline button
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1006,
+    "callback_query": {
+      "id": "callback-test-2",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 7,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:set:this:crypto:30"
     }
   }'
 

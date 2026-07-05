@@ -167,6 +167,11 @@ class NewsBot {
   async handleTelegramUpdate(update) {
     if (update.message?.text) {
       await this.handleMessage(update.message);
+      return;
+    }
+
+    if (update.callback_query) {
+      await this.handleCallbackQuery(update.callback_query);
     }
   }
 
@@ -184,12 +189,12 @@ class NewsBot {
         const updates = await this.telegram("getUpdates", {
           offset: this.offset,
           timeout: 25,
-          allowed_updates: ["message"],
+          allowed_updates: ["message", "callback_query"],
         });
 
         for (const update of updates.result || []) {
           this.offset = update.update_id + 1;
-          if (update.message?.text) await this.handleMessage(update.message);
+          await this.handleTelegramUpdate(update);
         }
       } catch (error) {
         console.error("Polling error:", error.message);
@@ -211,13 +216,13 @@ class NewsBot {
     if (command === "/start" || command === "/help") {
       await this.sendMessage(
         chatId,
-        "Commands:\n/setnews crypto\n/setnews politics\n/news\n/status\n/setinterval 30\n/stopnews"
+        "Commands:\n/setnews crypto\n/setnews politics\n/news\n/status\n/setinterval 30\n/stopnews\n/adminpanel"
       );
       return;
     }
 
-    if (command === "/adminhelp") {
-      await this.sendAdminHelp(chatId);
+    if (command === "/adminhelp" || command === "/adminpanel") {
+      await this.sendAdminHelp(chatId, true);
       return;
     }
 
@@ -279,6 +284,84 @@ class NewsBot {
     }
   }
 
+  async handleCallbackQuery(callbackQuery) {
+    const message = callbackQuery.message;
+    const chatId = String(message?.chat?.id || "");
+    const data = String(callbackQuery.data || "");
+
+    if (!chatId || !data.startsWith("admin:")) {
+      await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
+      return;
+    }
+
+    if (!(await this.requireAdmin({ from: callbackQuery.from, chat: message.chat }))) {
+      await this.answerCallbackQuery(callbackQuery.id, "Admin only.");
+      return;
+    }
+
+    const [, action, target = "this", topic, intervalMinutes, postLimit] = data.split(":");
+    const targetChatId = normalizeTargetChatId(target, chatId);
+
+    try {
+      if (action === "panel") {
+        await this.sendAdminHelp(chatId, true);
+        await this.answerCallbackQuery(callbackQuery.id, "Panel opened.");
+        return;
+      }
+
+      if (action === "set") {
+        const group = await this.configureGroup({
+          chatId: targetChatId,
+          topic,
+          intervalMinutes,
+          postLimit,
+        });
+        await this.sendMessage(chatId, `Saved from button.\n${formatGroupConfig(targetChatId, group)}`, {
+          replyMarkup: adminKeyboard(),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Saved.");
+        return;
+      }
+
+      if (action === "status") {
+        const group = this.getGroupConfig(targetChatId);
+        await this.sendMessage(chatId, group ? formatGroupConfig(targetChatId, group) : `No config found for ${targetChatId}.`, {
+          replyMarkup: adminKeyboard(),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
+        return;
+      }
+
+      if (action === "post") {
+        await this.postNewsNow(targetChatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Post requested.");
+        return;
+      }
+
+      if (action === "stop") {
+        this.disableGroup(targetChatId);
+        await this.sendMessage(chatId, `News stopped for ${targetChatId}.`, {
+          replyMarkup: adminKeyboard(),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Stopped.");
+        return;
+      }
+
+      if (action === "list") {
+        await this.handleAdminList(chatId);
+        await this.answerCallbackQuery(callbackQuery.id, "List sent.");
+        return;
+      }
+
+      await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
+    } catch (error) {
+      await this.sendMessage(chatId, `Button action failed: ${error.message}`, {
+        replyMarkup: adminKeyboard(),
+      });
+      await this.answerCallbackQuery(callbackQuery.id, "Action failed.");
+    }
+  }
+
   async requireAdmin(message) {
     if (this.adminChatIds.size === 0) return true;
 
@@ -289,11 +372,12 @@ class NewsBot {
     return false;
   }
 
-  async sendAdminHelp(chatId) {
+  async sendAdminHelp(chatId, includeButtons = false) {
     await this.sendMessage(
       chatId,
       [
         "Admin commands:",
+        "/adminpanel",
         "/adminid",
         "/adminset this crypto 30",
         "/adminset this politics 60 5",
@@ -304,7 +388,8 @@ class NewsBot {
         "/adminlist",
         "",
         "Format: /adminset <chatId|this> <topic> <intervalMinutes> [postLimit] [postAt|now]",
-      ].join("\n")
+      ].join("\n"),
+      includeButtons ? { replyMarkup: adminKeyboard() } : undefined
     );
   }
 
@@ -532,7 +617,8 @@ class NewsBot {
     writeJson(GROUPS_FILE, groups);
   }
 
-  async sendMessage(chatId, text, parseMode) {
+  async sendMessage(chatId, text, options) {
+    const parseMode = typeof options === "string" ? options : options?.parseMode;
     const payload = {
       chat_id: chatId,
       text,
@@ -540,7 +626,15 @@ class NewsBot {
     };
 
     if (parseMode) payload.parse_mode = parseMode;
+    if (options?.replyMarkup) payload.reply_markup = options.replyMarkup;
     await this.telegram("sendMessage", payload);
+  }
+
+  async answerCallbackQuery(callbackQueryId, text) {
+    await this.telegram("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+    });
   }
 
   async telegram(method, payload) {
@@ -615,6 +709,29 @@ function formatGroupConfig(chatId, group) {
     `Start: ${group.postAt || "now"}`,
     `Posts sent: ${group.postsSent || 0}`,
   ].join("\n");
+}
+
+function adminKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Crypto every 30m", callback_data: "admin:set:this:crypto:30" },
+        { text: "Politics every 30m", callback_data: "admin:set:this:politics:30" },
+      ],
+      [
+        { text: "Crypto 10 posts", callback_data: "admin:set:this:crypto:30:10" },
+        { text: "Politics 10 posts", callback_data: "admin:set:this:politics:30:10" },
+      ],
+      [
+        { text: "Status", callback_data: "admin:status:this" },
+        { text: "Post now", callback_data: "admin:post:this" },
+      ],
+      [
+        { text: "Stop", callback_data: "admin:stop:this" },
+        { text: "List configs", callback_data: "admin:list" },
+      ],
+    ],
+  };
 }
 
 async function findFreshArticle(chatId, topic) {
