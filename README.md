@@ -31,25 +31,28 @@ cd backend
 npm run dev
 ```
 
-## Telegram Commands
+## Telegram Buttons
 
-Use these commands inside the group where the bot was added:
+Press the bot's `Start` button once to open the button menu. After that, manage the bot from Telegram buttons:
 
 ```text
-/setnews crypto
-/setnews politics
-/news
-/status
-/setinterval 30
-/stopnews
-/adminpanel
-/adminid
+Status
+Latest news
+Admin panel
+Admin ID
+Set news
+Check group
+Send test
+Post now
+Stop
+List configs
 ```
 
 The bot stores group settings in `backend/data/groups.json`.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
-Use `/adminid` in Telegram to see your user id and the current chat id. Use `/adminpanel` to manage the bot with buttons.
+Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
+The group picker shows groups the bot has seen while running. It learns groups from Telegram membership updates or from any group message it receives.
 
 ## HTTP Routes
 
@@ -57,6 +60,7 @@ Use `/adminid` in Telegram to see your user id and the current chat id. Use `/ad
 GET /health
 GET /bot/status
 GET /admin/news-config
+GET /admin/groups
 GET /admin/news-config/:chatId
 POST /admin/news-config
 POST /admin/news-stop
@@ -73,3 +77,11 @@ POST /test/update
 ```
 
 See `post-test.txt` for curl examples.
+
+HTTP bot-status, admin, test, and webhook-management routes also use `TELEGRAM_ADMIN_CHAT_IDS`. Send the matching Telegram user id as:
+
+```text
+x-admin-chat-id: your_telegram_user_id
+```
+
+The live Telegram receiver `POST /webhook/telegram` stays open because Telegram cannot send your custom admin header.

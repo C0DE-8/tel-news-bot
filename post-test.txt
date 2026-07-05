@@ -9,23 +9,35 @@
 #
 # Default local URL:
 BASE_URL=http://localhost:3000
+ADMIN_HEADER="x-admin-chat-id: ADMIN_USER_ID"
+
+# Protected HTTP routes require x-admin-chat-id to match TELEGRAM_ADMIN_CHAT_IDS.
+# Telegram itself does not send this header to POST /webhook/telegram.
 
 ### Health
 curl -s http://localhost:3000/health
 
 ### Bot runtime status
-curl -s http://localhost:3000/bot/status
+curl -s http://localhost:3000/bot/status \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### Test router ping
-curl -s http://localhost:3000/test/ping
+curl -s http://localhost:3000/test/ping \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### Admin: list every group config
-curl -s http://localhost:3000/admin/news-config
+curl -s http://localhost:3000/admin/news-config \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
+
+### Admin: list known groups the bot has seen
+curl -s http://localhost:3000/admin/groups \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### Admin: configure a group to post crypto news every 30 minutes
 ### Replace CHAT_ID with your Telegram group chat id.
 curl -s -X POST http://localhost:3000/admin/news-config \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "chatId": "CHAT_ID",
     "topic": "crypto",
@@ -38,6 +50,7 @@ curl -s -X POST http://localhost:3000/admin/news-config \
 ### postAt accepts any valid ISO date string.
 curl -s -X POST http://localhost:3000/admin/news-config \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "chatId": "CHAT_ID",
     "topic": "politics",
@@ -49,6 +62,7 @@ curl -s -X POST http://localhost:3000/admin/news-config \
 ### Admin: post one item immediately after saving config
 curl -s -X POST http://localhost:3000/admin/news-config \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "chatId": "CHAT_ID",
     "topic": "crypto",
@@ -60,23 +74,28 @@ curl -s -X POST http://localhost:3000/admin/news-config \
 ### Admin: stop news for a group
 curl -s -X POST http://localhost:3000/admin/news-stop \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{"chatId":"CHAT_ID"}'
 
 ### Admin: get one group config
-curl -s http://localhost:3000/admin/news-config/CHAT_ID
+curl -s http://localhost:3000/admin/news-config/CHAT_ID \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### Admin: check if the bot can see and post in a group
 ### Replace CHAT_ID with the Telegram group chat id, usually a negative number.
 curl -s -X POST http://localhost:3000/admin/group-check \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{"chatId":"CHAT_ID"}'
 
 ### Admin: same group check with GET
-curl -s http://localhost:3000/admin/group-check/CHAT_ID
+curl -s http://localhost:3000/admin/group-check/CHAT_ID \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### Admin: send a test message to the group
 curl -s -X POST http://localhost:3000/admin/group-test-message \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "chatId": "CHAT_ID",
     "text": "Test message from the news bot."
@@ -84,13 +103,15 @@ curl -s -X POST http://localhost:3000/admin/group-test-message \
 
 ### Test router: simulate a Telegram /status update locally
 ### This calls the same handler used by Telegram updates.
+### It also teaches the bot that CHAT_ID is a group it can show as a button later.
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1000,
     "message": {
       "message_id": 1,
-      "chat": { "id": "CHAT_ID", "type": "group" },
+      "chat": { "id": "CHAT_ID", "type": "group", "title": "My Test Group" },
       "text": "/status"
     }
   }'
@@ -99,6 +120,7 @@ curl -s -X POST http://localhost:3000/test/update \
 ### Replace ADMIN_USER_ID with the Telegram user id allowed in TELEGRAM_ADMIN_CHAT_IDS.
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1002,
     "message": {
@@ -110,8 +132,10 @@ curl -s -X POST http://localhost:3000/test/update \
   }'
 
 ### Test router: simulate opening the Telegram admin button panel
+### If CHAT_ID was learned above, the panel will include it as a button.
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1003,
     "message": {
@@ -122,9 +146,59 @@ curl -s -X POST http://localhost:3000/test/update \
     }
   }'
 
+### Test router: simulate Telegram telling the bot it was added to a group
+### This also teaches the bot that CHAT_ID is a group it can show as a button.
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
+  -d '{
+    "update_id": 10030,
+    "my_chat_member": {
+      "chat": { "id": "CHAT_ID", "type": "group", "title": "My Test Group" },
+      "from": { "id": "ADMIN_USER_ID" },
+      "old_chat_member": { "status": "left" },
+      "new_chat_member": { "status": "administrator" }
+    }
+  }'
+
+### Test router: simulate clicking a known group button
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
+  -d '{
+    "update_id": 10031,
+    "callback_query": {
+      "id": "callback-group-1",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 41,
+        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
+      },
+      "data": "admin:group:CHAT_ID"
+    }
+  }'
+
+### Test router: simulate clicking the Admin ID button
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
+  -d '{
+    "update_id": 10032,
+    "callback_query": {
+      "id": "callback-id-1",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 42,
+        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
+      },
+      "data": "admin:id:this"
+    }
+  }'
+
 ### Test router: button step 1, click Set news
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1004,
     "callback_query": {
@@ -141,6 +215,7 @@ curl -s -X POST http://localhost:3000/test/update \
 ### Test router: button step 2, choose Crypto
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1005,
     "callback_query": {
@@ -157,6 +232,7 @@ curl -s -X POST http://localhost:3000/test/update \
 ### Test router: button step 3, choose 30 minutes
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1006,
     "callback_query": {
@@ -173,6 +249,7 @@ curl -s -X POST http://localhost:3000/test/update \
 ### Test router: button step 4, save with 10 post limit
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1007,
     "callback_query": {
@@ -190,6 +267,7 @@ curl -s -X POST http://localhost:3000/test/update \
 ### This calls Telegram getChat/getMe/getChatMember, so it needs a real token and real CHAT_ID.
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1008,
     "callback_query": {
@@ -203,10 +281,11 @@ curl -s -X POST http://localhost:3000/test/update \
     }
   }'
 
-### Test router: simulate clicking the Send test button
-### This sends a real Telegram message to CHAT_ID.
+### Test router: simulate clicking the Send test button after picking a group
+### This sends a real Telegram message to the selected group.
 curl -s -X POST http://localhost:3000/test/update \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "update_id": 1009,
     "callback_query": {
@@ -214,9 +293,9 @@ curl -s -X POST http://localhost:3000/test/update \
       "from": { "id": "ADMIN_USER_ID" },
       "message": {
         "message_id": 10,
-        "chat": { "id": "CHAT_ID", "type": "group" }
+        "chat": { "id": "ADMIN_PRIVATE_CHAT_ID", "type": "private" }
       },
-      "data": "admin:test:this"
+      "data": "admin:test:CHAT_ID"
     }
   }'
 
@@ -236,13 +315,16 @@ curl -s -X POST http://localhost:3000/webhook/telegram \
 ### Put your public HTTPS base URL in WEBHOOK_URL.
 curl -s -X POST http://localhost:3000/webhook/telegram/set \
   -H "Content-Type: application/json" \
+  -H "x-admin-chat-id: ADMIN_USER_ID" \
   -d '{
     "url": "WEBHOOK_URL/webhook/telegram",
     "dropPendingUpdates": false
   }'
 
 ### API route: Telegram webhook info
-curl -s http://localhost:3000/webhook/telegram/info
+curl -s http://localhost:3000/webhook/telegram/info \
+  -H "x-admin-chat-id: ADMIN_USER_ID"
 
 ### API route: delete Telegram webhook if you want to go back to polling
-curl -s -X DELETE http://localhost:3000/webhook/telegram
+curl -s -X DELETE http://localhost:3000/webhook/telegram \
+  -H "x-admin-chat-id: ADMIN_USER_ID"

@@ -1,16 +1,18 @@
 const { getPathname, readJsonBody, sendJson } = require("../utils/http");
 
-function createAdminRoute({ controller }) {
+function createAdminRoute({ controller, requireHttpAdmin }) {
+  const guard = requireHttpAdmin || (() => {});
   return {
-    handle: (req, res) => handleAdminRoute(req, res, controller),
+    handle: (req, res) => handleAdminRoute(req, res, controller, guard),
   };
 }
 
-async function handleAdminRoute(req, res, controller) {
+async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
   const pathname = getPathname(req);
 
   try {
     if (req.method === "GET" && pathname === "/admin/news-config") {
+      requireHttpAdmin(req);
       sendJson(res, 200, {
         ok: true,
         groups: controller.listConfigs(),
@@ -18,7 +20,17 @@ async function handleAdminRoute(req, res, controller) {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/admin/groups") {
+      requireHttpAdmin(req);
+      sendJson(res, 200, {
+        ok: true,
+        groups: controller.listGroups(),
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname.startsWith("/admin/news-config/")) {
+      requireHttpAdmin(req);
       const chatId = decodeURIComponent(pathname.replace("/admin/news-config/", ""));
       const group = controller.getConfig(chatId);
 
@@ -33,6 +45,7 @@ async function handleAdminRoute(req, res, controller) {
 
     if (req.method === "POST" && pathname === "/admin/news-config") {
       const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
       const group = await controller.configureNews(payload);
       sendJson(res, 200, { ok: true, group });
       return;
@@ -40,6 +53,7 @@ async function handleAdminRoute(req, res, controller) {
 
     if (req.method === "POST" && pathname === "/admin/news-stop") {
       const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
       const group = controller.stopNews(payload.chatId);
       sendJson(res, 200, { ok: true, group });
       return;
@@ -47,12 +61,14 @@ async function handleAdminRoute(req, res, controller) {
 
     if (req.method === "POST" && pathname === "/admin/group-check") {
       const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
       const result = await controller.checkGroup(payload.chatId);
       sendJson(res, 200, { ok: true, result });
       return;
     }
 
     if (req.method === "GET" && pathname.startsWith("/admin/group-check/")) {
+      requireHttpAdmin(req);
       const chatId = decodeURIComponent(pathname.replace("/admin/group-check/", ""));
       const result = await controller.checkGroup(chatId);
       sendJson(res, 200, { ok: true, result });
@@ -61,6 +77,7 @@ async function handleAdminRoute(req, res, controller) {
 
     if (req.method === "POST" && pathname === "/admin/group-test-message") {
       const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
       const result = await controller.sendTestMessage(payload);
       sendJson(res, 200, { ok: true, result });
       return;
@@ -71,6 +88,7 @@ async function handleAdminRoute(req, res, controller) {
       error: "Route not found",
       routes: [
         "GET /admin/news-config",
+        "GET /admin/groups",
         "GET /admin/news-config/:chatId",
         "POST /admin/news-config",
         "POST /admin/news-stop",

@@ -5,6 +5,7 @@ const { getPathname, sendJson } = require("../utils/http");
 const DATA_DIR = path.join(__dirname, "..", "data");
 const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
+const CHATS_FILE = path.join(DATA_DIR, "chats.json");
 
 const NEWS_TOPICS = {
   crypto: [
@@ -17,7 +18,7 @@ const NEWS_TOPICS = {
   ],
 };
 
-function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminChatIds }) {
+function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminChatIds, requireHttpAdmin }) {
   const bot = new NewsBot({
     token,
     defaultIntervalMinutes,
@@ -28,23 +29,31 @@ function createNewsBotRoute({ token, defaultIntervalMinutes, useWebhook, adminCh
   return {
     bot,
     start: () => bot.start(),
-    handle: (req, res) => handleRoute(req, res, bot),
+    handle: (req, res) => handleRoute(req, res, bot, requireHttpAdmin || (() => {})),
   };
 }
 
-async function handleRoute(req, res, bot) {
+async function handleRoute(req, res, bot, requireHttpAdmin) {
   const pathname = getPathname(req);
 
-  if (req.method === "GET" && pathname === "/bot/status") {
-    sendJson(res, 200, bot.getStatus());
-    return;
-  }
+  try {
+    if (req.method === "GET" && pathname === "/bot/status") {
+      requireHttpAdmin(req);
+      sendJson(res, 200, bot.getStatus());
+      return;
+    }
 
-  sendJson(res, 404, {
-    ok: false,
-    error: "Route not found",
-    routes: ["GET /bot/status"],
-  });
+    sendJson(res, 404, {
+      ok: false,
+      error: "Route not found",
+      routes: ["GET /bot/status"],
+    });
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, {
+      ok: false,
+      error: error.message,
+    });
+  }
 }
 
 class NewsBot {
@@ -96,6 +105,12 @@ class NewsBot {
   listGroupConfigs() {
     ensureDataFiles();
     return readJson(GROUPS_FILE);
+  }
+
+  listKnownGroups() {
+    ensureDataFiles();
+    const chats = readJson(CHATS_FILE);
+    return Object.values(chats).filter((chat) => isGroupChatType(chat.type));
   }
 
   getGroupConfig(chatId) {
@@ -166,14 +181,37 @@ class NewsBot {
   }
 
   async handleTelegramUpdate(update) {
-    if (update.message?.text) {
-      await this.handleMessage(update.message);
+    if (update.message) {
+      this.rememberChat(update.message.chat);
+      if (update.message.text) await this.handleMessage(update.message);
       return;
     }
 
     if (update.callback_query) {
+      this.rememberChat(update.callback_query.message?.chat);
       await this.handleCallbackQuery(update.callback_query);
+      return;
     }
+
+    if (update.my_chat_member) {
+      this.rememberChat(update.my_chat_member.chat);
+    }
+  }
+
+  rememberChat(chat) {
+    if (!chat?.id || !isGroupChatType(chat.type)) return;
+
+    ensureDataFiles();
+    const chats = readJson(CHATS_FILE);
+    const chatId = String(chat.id);
+    chats[chatId] = {
+      id: chatId,
+      title: chat.title || chat.username || chat.first_name || chatId,
+      type: chat.type,
+      username: chat.username || null,
+      updatedAt: new Date().toISOString(),
+    };
+    writeJson(CHATS_FILE, chats);
   }
 
   startTelegramPolling() {
@@ -190,7 +228,7 @@ class NewsBot {
         const updates = await this.telegram("getUpdates", {
           offset: this.offset,
           timeout: 25,
-          allowed_updates: ["message", "callback_query"],
+          allowed_updates: ["message", "callback_query", "my_chat_member"],
         });
 
         for (const update of updates.result || []) {
@@ -215,10 +253,7 @@ class NewsBot {
     if (!command.startsWith("/")) return;
 
     if (command === "/start" || command === "/help") {
-      await this.sendMessage(
-        chatId,
-        "Commands:\n/setnews crypto\n/setnews politics\n/news\n/status\n/setinterval 30\n/stopnews\n/adminpanel"
-      );
+      await this.sendMainMenu(chatId);
       return;
     }
 
@@ -303,8 +338,13 @@ class NewsBot {
     const chatId = String(message?.chat?.id || "");
     const data = String(callbackQuery.data || "");
 
-    if (!chatId || !data.startsWith("admin:")) {
+    if (!chatId || (!data.startsWith("admin:") && !data.startsWith("bot:"))) {
       await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
+      return;
+    }
+
+    if (data.startsWith("bot:")) {
+      await this.handleBotCallback(callbackQuery, chatId, data);
       return;
     }
 
@@ -320,6 +360,27 @@ class NewsBot {
       if (action === "panel") {
         await this.sendAdminPanel(chatId);
         await this.answerCallbackQuery(callbackQuery.id, "Panel opened.");
+        return;
+      }
+
+      if (action === "groups") {
+        await this.sendGroupPicker(chatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
+        return;
+      }
+
+      if (action === "group") {
+        const group = this.listKnownGroups().find((knownGroup) => knownGroup.id === targetChatId);
+        await this.sendMessage(chatId, `Managing ${formatChatLabel(group || { id: targetChatId })}`, {
+          replyMarkup: adminKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Group selected.");
+        return;
+      }
+
+      if (action === "id") {
+        await this.sendMessage(chatId, `Your admin id: ${callbackQuery.from?.id || "unknown"}\nThis chat id: ${chatId}`);
+        await this.answerCallbackQuery(callbackQuery.id, "ID sent.");
         return;
       }
 
@@ -415,6 +476,55 @@ class NewsBot {
     }
   }
 
+  async handleBotCallback(callbackQuery, chatId, data) {
+    const [, action, target = "this"] = data.split(":");
+    const targetChatId = normalizeTargetChatId(target, chatId);
+
+    if (action === "menu") {
+      await this.sendMainMenu(chatId);
+      await this.answerCallbackQuery(callbackQuery.id, "Menu opened.");
+      return;
+    }
+
+    if (action === "status") {
+      await this.sendChatStatus(targetChatId);
+      await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
+      return;
+    }
+
+    if (action === "news") {
+      if (!(await this.requireAdmin({ from: callbackQuery.from, chat: callbackQuery.message.chat }))) {
+        await this.answerCallbackQuery(callbackQuery.id, "Admin only.");
+        return;
+      }
+
+      await this.postNewsNow(targetChatId);
+      await this.answerCallbackQuery(callbackQuery.id, "Post requested.");
+      return;
+    }
+
+    if (action === "admin") {
+      if (!(await this.requireAdmin({ from: callbackQuery.from, chat: callbackQuery.message.chat }))) {
+        await this.answerCallbackQuery(callbackQuery.id, "Admin only.");
+        return;
+      }
+
+      await this.sendAdminPanel(chatId);
+      await this.answerCallbackQuery(callbackQuery.id, "Admin panel opened.");
+      return;
+    }
+
+    if (action === "id") {
+      await this.sendMessage(chatId, `Your admin id: ${callbackQuery.from?.id || "unknown"}\nThis chat id: ${chatId}`, {
+        replyMarkup: mainMenuKeyboard(chatId),
+      });
+      await this.answerCallbackQuery(callbackQuery.id, "ID sent.");
+      return;
+    }
+
+    await this.answerCallbackQuery(callbackQuery.id, "Unknown action.");
+  }
+
   async requireAdmin(message) {
     if (this.adminChatIds.size === 0) return true;
 
@@ -426,20 +536,35 @@ class NewsBot {
   }
 
   async sendAdminHelp(chatId, includeButtons = false) {
+    const knownGroups = this.listKnownGroups();
+    const text = knownGroups.length
+      ? "Admin panel\nPick a group below, then choose what the bot should do."
+      : "Admin panel\nNo known groups yet. Send any message in the group while the bot is running, then open this panel again.";
+
     await this.sendMessage(
       chatId,
-      [
-        "Admin panel:",
-        "Use the buttons below to manage this chat.",
-        "Use /adminid only when you need to find your admin id.",
-      ].join("\n"),
-      includeButtons ? { replyMarkup: adminKeyboard(chatId) } : undefined
+      text,
+      includeButtons ? { replyMarkup: adminHomeKeyboard(chatId, knownGroups) } : undefined
     );
   }
 
+  async sendMainMenu(chatId) {
+    await this.sendMessage(chatId, "Choose an action.", {
+      replyMarkup: mainMenuKeyboard(chatId),
+    });
+  }
+
   async sendAdminPanel(chatId) {
-    await this.sendMessage(chatId, "Admin panel\nChoose an action.", {
-      replyMarkup: adminKeyboard(chatId),
+    const knownGroups = this.listKnownGroups();
+    await this.sendMessage(chatId, "Admin panel\nPick a group to manage.", {
+      replyMarkup: adminHomeKeyboard(chatId, knownGroups),
+    });
+  }
+
+  async sendGroupPicker(chatId) {
+    const knownGroups = this.listKnownGroups();
+    await this.sendMessage(chatId, knownGroups.length ? "Pick a group." : "No known groups yet.", {
+      replyMarkup: groupPickerKeyboard(chatId, knownGroups),
     });
   }
 
@@ -524,7 +649,9 @@ class NewsBot {
   async setNewsTopic(chatId, topic) {
     const normalizedTopic = String(topic || "").toLowerCase();
     if (!NEWS_TOPICS[normalizedTopic]) {
-      await this.sendMessage(chatId, "Choose a valid topic: crypto or politics.\nExample: /setnews crypto");
+      await this.sendMessage(chatId, "Choose a valid topic from the admin panel.", {
+        replyMarkup: adminKeyboard(chatId),
+      });
       return;
     }
 
@@ -551,13 +678,17 @@ class NewsBot {
   async setIntervalMinutes(chatId, minutesValue) {
     const minutes = Number(minutesValue);
     if (!Number.isInteger(minutes) || minutes < 5 || minutes > 1440) {
-      await this.sendMessage(chatId, "Use a whole number from 5 to 1440.\nExample: /setinterval 30");
+      await this.sendMessage(chatId, "Choose an interval from the admin panel.", {
+        replyMarkup: adminKeyboard(chatId),
+      });
       return;
     }
 
     const groups = readJson(GROUPS_FILE);
     if (!groups[chatId]) {
-      await this.sendMessage(chatId, "Set a topic first.\nExample: /setnews crypto");
+      await this.sendMessage(chatId, "Set a topic first from the admin panel.", {
+        replyMarkup: adminKeyboard(chatId),
+      });
       return;
     }
 
@@ -575,7 +706,9 @@ class NewsBot {
     const group = groups[chatId];
 
     if (!group || !group.enabled) {
-      await this.sendMessage(chatId, "News posting is not active. Use /setnews crypto or /setnews politics.");
+      await this.sendMessage(chatId, "News posting is not active. Open the admin panel and choose Set news.", {
+        replyMarkup: mainMenuKeyboard(chatId),
+      });
       return;
     }
 
@@ -587,6 +720,7 @@ class NewsBot {
     if (!normalizedChatId) throwHttpError(400, "chatId is required");
 
     const [chat, botUser] = await Promise.all([this.telegram("getChat", { chat_id: normalizedChatId }), this.getMe()]);
+    this.rememberChat(chat.result);
     const membership = await this.telegram("getChatMember", {
       chat_id: normalizedChatId,
       user_id: botUser.id,
@@ -679,7 +813,9 @@ class NewsBot {
     const groups = readJson(GROUPS_FILE);
     const group = groups[chatId];
     if (!group?.enabled || !NEWS_TOPICS[group.topic]) {
-      await this.sendMessage(chatId, "Set a topic first.\nExample: /setnews crypto");
+      await this.sendMessage(chatId, "Set a topic first from the admin panel.", {
+        replyMarkup: adminKeyboard(chatId),
+      });
       return;
     }
 
@@ -762,7 +898,7 @@ class NewsBot {
 
     return this.telegram("setWebhook", {
       url,
-      allowed_updates: options.allowedUpdates || ["message", "callback_query"],
+      allowed_updates: options.allowedUpdates || ["message", "callback_query", "my_chat_member"],
       drop_pending_updates: options.dropPendingUpdates === true,
     });
   }
@@ -824,6 +960,18 @@ function normalizeTargetChatId(value, currentChatId) {
   return String(value).trim();
 }
 
+function isGroupChatType(type) {
+  return ["group", "supergroup", "channel"].includes(type);
+}
+
+function isLikelyGroupChatId(chatId) {
+  return String(chatId).startsWith("-");
+}
+
+function formatChatLabel(chat) {
+  return `${chat.title || chat.username || chat.id} (${chat.id})`;
+}
+
 function formatGroupConfig(chatId, group) {
   return [
     `Chat: ${chatId}`,
@@ -856,6 +1004,54 @@ function canBotPost(member) {
   if (!member || member.status === "left" || member.status === "kicked") return false;
   if (member.status === "restricted") return member.can_send_messages !== false;
   return ["creator", "administrator", "member"].includes(member.status);
+}
+
+function mainMenuKeyboard(currentChatId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Status", callback_data: `bot:status:${currentChatId}` },
+        { text: "Latest news", callback_data: `bot:news:${currentChatId}` },
+      ],
+      [
+        { text: "Admin panel", callback_data: `bot:admin:${currentChatId}` },
+        { text: "Admin ID", callback_data: "bot:id:this" },
+      ],
+    ],
+  };
+}
+
+function adminHomeKeyboard(currentChatId, knownGroups) {
+  const rows = [];
+
+  if (knownGroups.length) {
+    rows.push([{ text: "Pick group", callback_data: "admin:groups:this" }]);
+    for (const group of knownGroups.slice(0, 8)) {
+      rows.push([{ text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` }]);
+    }
+  }
+
+  if (isLikelyGroupChatId(currentChatId)) {
+    rows.push([{ text: "Manage this group", callback_data: `admin:group:${currentChatId}` }]);
+  }
+
+  rows.push([{ text: "Refresh groups", callback_data: "admin:groups:this" }]);
+  rows.push([{ text: "Admin ID", callback_data: "admin:id:this" }]);
+
+  return { inline_keyboard: rows };
+}
+
+function groupPickerKeyboard(currentChatId, knownGroups) {
+  const rows = knownGroups.slice(0, 20).map((group) => [
+    { text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` },
+  ]);
+
+  if (isLikelyGroupChatId(currentChatId)) {
+    rows.push([{ text: "This group", callback_data: `admin:group:${currentChatId}` }]);
+  }
+
+  rows.push([{ text: "Back", callback_data: "admin:panel:this" }]);
+  return { inline_keyboard: rows };
 }
 
 function adminKeyboard(targetChatId = "this") {
@@ -985,6 +1181,7 @@ function ensureDataFiles() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(GROUPS_FILE)) writeJson(GROUPS_FILE, {});
   if (!fs.existsSync(POSTED_FILE)) writeJson(POSTED_FILE, {});
+  if (!fs.existsSync(CHATS_FILE)) writeJson(CHATS_FILE, {});
 }
 
 function matchFirst(value, regex) {

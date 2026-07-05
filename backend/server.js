@@ -6,21 +6,24 @@ const { createAdminRoute } = require("./routes/admin.route");
 const { createNewsBotRoute } = require("./routes/newsBot.route");
 const { createTestRoute } = require("./routes/test.route");
 const { createWebhookRoute } = require("./routes/webhook.route");
+const { createHttpAdminGuard } = require("./utils/adminAuth");
 const { getPathname, sendJson } = require("./utils/http");
 
 loadEnv();
 
 const PORT = Number(process.env.PORT || 3000);
+const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({
   token: process.env.TELEGRAM_BOT_TOKEN,
   defaultIntervalMinutes: Number(process.env.POST_INTERVAL_MINUTES || 30),
   useWebhook: process.env.TELEGRAM_USE_WEBHOOK === "true",
   adminChatIds: process.env.TELEGRAM_ADMIN_CHAT_IDS,
+  requireHttpAdmin,
 });
 const adminController = createAdminController({ bot: newsBotRoute.bot });
-const adminRoute = createAdminRoute({ controller: adminController });
-const webhookRoute = createWebhookRoute({ bot: newsBotRoute.bot });
-const testRoute = createTestRoute({ bot: newsBotRoute.bot });
+const adminRoute = createAdminRoute({ controller: adminController, requireHttpAdmin });
+const webhookRoute = createWebhookRoute({ bot: newsBotRoute.bot, requireHttpAdmin });
+const testRoute = createTestRoute({ bot: newsBotRoute.bot, requireHttpAdmin });
 
 const server = http.createServer(async (req, res) => {
   const pathname = getPathname(req);
@@ -57,6 +60,7 @@ const server = http.createServer(async (req, res) => {
       "GET /health",
       "GET /bot/status",
       "GET /admin/news-config",
+      "GET /admin/groups",
       "GET /admin/news-config/:chatId",
       "POST /admin/news-config",
       "POST /admin/news-stop",

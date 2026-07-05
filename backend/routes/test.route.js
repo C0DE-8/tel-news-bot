@@ -1,16 +1,18 @@
 const { getPathname, readJsonBody, sendJson } = require("../utils/http");
 
-function createTestRoute({ bot }) {
+function createTestRoute({ bot, requireHttpAdmin }) {
+  const guard = requireHttpAdmin || (() => {});
   return {
-    handle: (req, res) => handleTestRoute(req, res, bot),
+    handle: (req, res) => handleTestRoute(req, res, bot, guard),
   };
 }
 
-async function handleTestRoute(req, res, bot) {
+async function handleTestRoute(req, res, bot, requireHttpAdmin) {
   const pathname = getPathname(req);
 
   try {
     if (req.method === "GET" && pathname === "/test/ping") {
+      requireHttpAdmin(req);
       sendJson(res, 200, {
         ok: true,
         message: "pong",
@@ -21,6 +23,7 @@ async function handleTestRoute(req, res, bot) {
 
     if (req.method === "POST" && pathname === "/test/update") {
       const update = await readJsonBody(req);
+      requireHttpAdmin(req, update);
       await bot.handleTelegramUpdate(update);
       sendJson(res, 200, { ok: true });
       return;

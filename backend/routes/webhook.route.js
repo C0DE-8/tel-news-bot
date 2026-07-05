@@ -1,17 +1,19 @@
 const { getPathname, readJsonBody, sendJson } = require("../utils/http");
 
-function createWebhookRoute({ bot }) {
+function createWebhookRoute({ bot, requireHttpAdmin }) {
+  const guard = requireHttpAdmin || (() => {});
   return {
-    handle: (req, res) => handleWebhookRoute(req, res, bot),
+    handle: (req, res) => handleWebhookRoute(req, res, bot, guard),
   };
 }
 
-async function handleWebhookRoute(req, res, bot) {
+async function handleWebhookRoute(req, res, bot, requireHttpAdmin) {
   const pathname = getPathname(req);
 
   try {
     if (req.method === "POST" && pathname === "/webhook/telegram/set") {
       const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
       const result = await bot.setWebhook(payload.url, {
         allowedUpdates: payload.allowedUpdates,
         dropPendingUpdates: payload.dropPendingUpdates,
@@ -21,6 +23,7 @@ async function handleWebhookRoute(req, res, bot) {
     }
 
     if (req.method === "GET" && pathname === "/webhook/telegram/info") {
+      requireHttpAdmin(req);
       const result = await bot.getWebhookInfo();
       sendJson(res, 200, { ok: true, result });
       return;
@@ -31,6 +34,7 @@ async function handleWebhookRoute(req, res, bot) {
       (req.method === "POST" && pathname === "/webhook/telegram/delete")
     ) {
       const payload = req.method === "POST" ? await readJsonBody(req) : {};
+      requireHttpAdmin(req, payload);
       const result = await bot.deleteWebhook(payload.dropPendingUpdates);
       sendJson(res, 200, { ok: true, result });
       return;
