@@ -1,0 +1,11 @@
+{
+  "6112214313": {
+    "topic": "crypto",
+    "intervalMinutes": 30,
+    "postLimit": null,
+    "postAt": null,
+    "postsSent": 0,
+    "enabled": true,
+    "updatedAt": "2026-07-05T02:08:57.564Z"
+  }
+}
