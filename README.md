@@ -60,6 +60,9 @@ GET /admin/news-config
 GET /admin/news-config/:chatId
 POST /admin/news-config
 POST /admin/news-stop
+POST /admin/group-check
+GET /admin/group-check/:chatId
+POST /admin/group-test-message
 POST /webhook/telegram
 POST /webhook/telegram/set
 GET /webhook/telegram/info

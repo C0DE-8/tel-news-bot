@@ -45,6 +45,27 @@ async function handleAdminRoute(req, res, controller) {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/admin/group-check") {
+      const payload = await readJsonBody(req);
+      const result = await controller.checkGroup(payload.chatId);
+      sendJson(res, 200, { ok: true, result });
+      return;
+    }
+
+    if (req.method === "GET" && pathname.startsWith("/admin/group-check/")) {
+      const chatId = decodeURIComponent(pathname.replace("/admin/group-check/", ""));
+      const result = await controller.checkGroup(chatId);
+      sendJson(res, 200, { ok: true, result });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/admin/group-test-message") {
+      const payload = await readJsonBody(req);
+      const result = await controller.sendTestMessage(payload);
+      sendJson(res, 200, { ok: true, result });
+      return;
+    }
+
     sendJson(res, 404, {
       ok: false,
       error: "Route not found",
@@ -53,6 +74,9 @@ async function handleAdminRoute(req, res, controller) {
         "GET /admin/news-config/:chatId",
         "POST /admin/news-config",
         "POST /admin/news-stop",
+        "POST /admin/group-check",
+        "GET /admin/group-check/:chatId",
+        "POST /admin/group-test-message",
       ],
     });
   } catch (error) {

@@ -56,6 +56,7 @@ class NewsBot {
     this.offset = 0;
     this.started = false;
     this.groupTimers = new Map();
+    this.botUser = null;
   }
 
   start() {
@@ -256,6 +257,18 @@ class NewsBot {
       return;
     }
 
+    if (command === "/admincheck") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.handleAdminCheck(chatId, args);
+      return;
+    }
+
+    if (command === "/admintest") {
+      if (!(await this.requireAdmin(message))) return;
+      await this.sendTestMessage(normalizeTargetChatId(args[0], chatId));
+      return;
+    }
+
     if (command === "/setnews") {
       if (!(await this.requireAdmin(message))) return;
       await this.setNewsTopic(chatId, arg);
@@ -354,6 +367,21 @@ class NewsBot {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
+        return;
+      }
+
+      if (action === "check") {
+        const result = await this.checkGroupAccess(targetChatId);
+        await this.sendMessage(chatId, formatGroupAccess(result), {
+          replyMarkup: adminKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Group checked.");
+        return;
+      }
+
+      if (action === "test") {
+        await this.sendTestMessage(targetChatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Test sent.");
         return;
       }
 
@@ -473,6 +501,19 @@ class NewsBot {
     await this.sendMessage(currentChatId, formatGroupConfig(targetChatId, group));
   }
 
+  async handleAdminCheck(currentChatId, args) {
+    const targetChatId = normalizeTargetChatId(args[0], currentChatId);
+
+    try {
+      const result = await this.checkGroupAccess(targetChatId);
+      await this.sendMessage(currentChatId, formatGroupAccess(result), {
+        replyMarkup: adminKeyboard(targetChatId),
+      });
+    } catch (error) {
+      await this.sendMessage(currentChatId, `Group check failed: ${error.message}`);
+    }
+  }
+
   async handleAdminList(chatId) {
     const groups = this.listGroupConfigs();
     const lines = Object.entries(groups).map(([groupChatId, group]) => formatGroupConfig(groupChatId, group));
@@ -539,6 +580,40 @@ class NewsBot {
     }
 
     await this.sendMessage(chatId, `Active topic: ${group.topic}\nInterval: ${group.intervalMinutes} minutes`);
+  }
+
+  async checkGroupAccess(chatId) {
+    const normalizedChatId = String(chatId || "").trim();
+    if (!normalizedChatId) throwHttpError(400, "chatId is required");
+
+    const [chat, botUser] = await Promise.all([this.telegram("getChat", { chat_id: normalizedChatId }), this.getMe()]);
+    const membership = await this.telegram("getChatMember", {
+      chat_id: normalizedChatId,
+      user_id: botUser.id,
+    });
+
+    return {
+      chatId: normalizedChatId,
+      chat: chat.result,
+      bot: botUser,
+      membership: membership.result,
+      canPost: canBotPost(membership.result),
+    };
+  }
+
+  async sendTestMessage(chatId, text) {
+    const normalizedChatId = String(chatId || "").trim();
+    if (!normalizedChatId) throwHttpError(400, "chatId is required");
+
+    const response = await this.sendMessage(
+      normalizedChatId,
+      text || `Test message from news bot.\nChat id: ${normalizedChatId}\nTime: ${new Date().toISOString()}`
+    );
+
+    return {
+      chatId: normalizedChatId,
+      message: response.result,
+    };
   }
 
   async stopNews(chatId) {
@@ -649,7 +724,7 @@ class NewsBot {
 
     if (parseMode) payload.parse_mode = parseMode;
     if (options?.replyMarkup) payload.reply_markup = options.replyMarkup;
-    await this.telegram("sendMessage", payload);
+    return this.telegram("sendMessage", payload);
   }
 
   async answerCallbackQuery(callbackQueryId, text) {
@@ -657,6 +732,14 @@ class NewsBot {
       callback_query_id: callbackQueryId,
       text,
     });
+  }
+
+  async getMe() {
+    if (this.botUser) return this.botUser;
+
+    const response = await this.telegram("getMe", {});
+    this.botUser = response.result;
+    return this.botUser;
   }
 
   async telegram(method, payload) {
@@ -753,6 +836,28 @@ function formatGroupConfig(chatId, group) {
   ].join("\n");
 }
 
+function formatGroupAccess(result) {
+  const chatTitle = result.chat.title || result.chat.username || result.chat.id;
+  const member = result.membership;
+
+  return [
+    `Group check for ${chatTitle}`,
+    `Chat id: ${result.chatId}`,
+    `Bot: @${result.bot.username || result.bot.first_name}`,
+    `Bot status: ${member.status}`,
+    `Can post: ${result.canPost ? "yes" : "no"}`,
+    member.can_send_messages === false ? "Reason: can_send_messages is false" : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function canBotPost(member) {
+  if (!member || member.status === "left" || member.status === "kicked") return false;
+  if (member.status === "restricted") return member.can_send_messages !== false;
+  return ["creator", "administrator", "member"].includes(member.status);
+}
+
 function adminKeyboard(targetChatId = "this") {
   return {
     inline_keyboard: [
@@ -762,6 +867,10 @@ function adminKeyboard(targetChatId = "this") {
       [
         { text: "Status", callback_data: `admin:status:${targetChatId}` },
         { text: "Post now", callback_data: `admin:post:${targetChatId}` },
+      ],
+      [
+        { text: "Check group", callback_data: `admin:check:${targetChatId}` },
+        { text: "Send test", callback_data: `admin:test:${targetChatId}` },
       ],
       [
         { text: "Stop", callback_data: `admin:stop:${targetChatId}` },

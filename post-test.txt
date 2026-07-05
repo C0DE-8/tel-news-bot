@@ -65,6 +65,23 @@ curl -s -X POST http://localhost:3000/admin/news-stop \
 ### Admin: get one group config
 curl -s http://localhost:3000/admin/news-config/CHAT_ID
 
+### Admin: check if the bot can see and post in a group
+### Replace CHAT_ID with the Telegram group chat id, usually a negative number.
+curl -s -X POST http://localhost:3000/admin/group-check \
+  -H "Content-Type: application/json" \
+  -d '{"chatId":"CHAT_ID"}'
+
+### Admin: same group check with GET
+curl -s http://localhost:3000/admin/group-check/CHAT_ID
+
+### Admin: send a test message to the group
+curl -s -X POST http://localhost:3000/admin/group-test-message \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "CHAT_ID",
+    "text": "Test message from the news bot."
+  }'
+
 ### Test router: simulate a Telegram /status update locally
 ### This calls the same handler used by Telegram updates.
 curl -s -X POST http://localhost:3000/test/update \
@@ -166,6 +183,40 @@ curl -s -X POST http://localhost:3000/test/update \
         "chat": { "id": "CHAT_ID", "type": "group" }
       },
       "data": "admin:set:this:crypto:30:10"
+    }
+  }'
+
+### Test router: simulate clicking the Check group button
+### This calls Telegram getChat/getMe/getChatMember, so it needs a real token and real CHAT_ID.
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1008,
+    "callback_query": {
+      "id": "callback-test-5",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 9,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:check:this"
+    }
+  }'
+
+### Test router: simulate clicking the Send test button
+### This sends a real Telegram message to CHAT_ID.
+curl -s -X POST http://localhost:3000/test/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "update_id": 1009,
+    "callback_query": {
+      "id": "callback-test-6",
+      "from": { "id": "ADMIN_USER_ID" },
+      "message": {
+        "message_id": 10,
+        "chat": { "id": "CHAT_ID", "type": "group" }
+      },
+      "data": "admin:test:this"
     }
   }'
 
