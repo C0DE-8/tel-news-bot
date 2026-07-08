@@ -7,7 +7,6 @@ const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
 const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
-const SCHEDULED_POST_COOLDOWN_MS = 60 * 1000;
 
 const NEWS_TOPICS = {
   crypto: [
@@ -99,6 +98,7 @@ class NewsBot {
   getStatus() {
     const groups = fs.existsSync(GROUPS_FILE) ? readJson(GROUPS_FILE) : {};
     const activeGroups = Object.values(groups).filter((group) => group.enabled).length;
+    const now = new Date();
 
     return {
       ok: true,
@@ -108,12 +108,15 @@ class NewsBot {
       topics: Object.keys(NEWS_TOPICS),
       adminRestricted: this.adminChatIds.size > 0,
       scheduler: process.env.VERCEL ? "cron-route" : "local-timer",
+      schedules: Object.fromEntries(
+        Object.entries(groups).map(([chatId, group]) => [chatId, getScheduleStatus(group, now)])
+      ),
     };
   }
 
   listGroupConfigs() {
     ensureDataFiles();
-    return readJson(GROUPS_FILE);
+    return addScheduleStatuses(readJson(GROUPS_FILE));
   }
 
   listKnownGroups() {
@@ -130,7 +133,8 @@ class NewsBot {
 
   getGroupConfig(chatId) {
     ensureDataFiles();
-    return readJson(GROUPS_FILE)[String(chatId)] || null;
+    const group = readJson(GROUPS_FILE)[String(chatId)] || null;
+    return group ? addScheduleStatus(group) : null;
   }
 
   async configureGroup(payload) {
@@ -188,7 +192,7 @@ class NewsBot {
       { replyMarkup: adminKeyboard(chatId) }
     );
 
-    return groups[chatId];
+    return addScheduleStatus(groups[chatId]);
   }
 
   disableGroup(chatId) {
@@ -207,7 +211,7 @@ class NewsBot {
     writeJson(GROUPS_FILE, groups);
     this.clearGroupTimer(normalizedChatId);
 
-    return groups[normalizedChatId];
+    return addScheduleStatus(groups[normalizedChatId]);
   }
 
   enableGroup(chatId) {
@@ -230,7 +234,7 @@ class NewsBot {
     writeJson(GROUPS_FILE, groups);
     this.scheduleGroup(normalizedChatId, groups[normalizedChatId]);
 
-    return groups[normalizedChatId];
+    return addScheduleStatus(groups[normalizedChatId]);
   }
 
   async handleTelegramUpdate(update) {
@@ -878,11 +882,13 @@ class NewsBot {
       checked: 0,
       posted: 0,
       skipped: 0,
+      schedules: {},
       errors: [],
     };
 
     for (const [chatId, group] of Object.entries(groups)) {
       summary.checked += 1;
+      summary.schedules[chatId] = getScheduleStatus(group, now);
 
       if (!group.enabled || !NEWS_TOPICS[group.topic]) {
         summary.skipped += 1;
@@ -908,6 +914,8 @@ class NewsBot {
         } else {
           summary.skipped += 1;
         }
+        const latestGroups = readJson(GROUPS_FILE);
+        summary.schedules[chatId] = getScheduleStatus(latestGroups[chatId], now);
       } catch (error) {
         summary.errors.push({ chatId, error: error.message });
         await this.sendAdminUpdate(`Scheduled post failed for ${chatId}: ${error.message}`);
@@ -1133,24 +1141,104 @@ function getManualPostCooldownRemaining(group) {
 }
 
 function getScheduleDueState(group, now) {
-  if (group.postAt && Date.parse(group.postAt) > now.getTime()) {
-    return { ready: false, reason: "waiting_for_start_time" };
+  const status = getScheduleStatus(group, now);
+  if (!status.enabled) {
+    return { ready: false, reason: status.reason };
   }
 
-  if (group.lastScheduledAttemptAt) {
-    const attemptElapsedMs = now.getTime() - Date.parse(group.lastScheduledAttemptAt);
-    if (Number.isFinite(attemptElapsedMs) && attemptElapsedMs < SCHEDULED_POST_COOLDOWN_MS) {
-      return { ready: false, reason: "attempt_cooldown" };
-    }
+  if (status.due) {
+    return { ready: true, reason: "due" };
+  }
+
+  return { ready: false, reason: status.reason };
+}
+
+function getScheduleStatus(group, now = new Date()) {
+  if (!group) {
+    return { enabled: false, due: false, reason: "missing_config" };
+  }
+
+  if (!group.enabled) {
+    return { enabled: false, due: false, reason: "disabled" };
+  }
+
+  if (!NEWS_TOPICS[group.topic]) {
+    return { enabled: false, due: false, reason: "missing_topic" };
   }
 
   const intervalMs = Math.max(5, group.intervalMinutes || 30) * 60 * 1000;
+  const startTime = Date.parse(group.postAt || 0);
   const lastRunTime = latestTimestamp(group.lastScheduledPostAt, group.lastScheduledAttemptAt, group.updatedAt);
-  if (Number.isFinite(lastRunTime) && now.getTime() - lastRunTime < intervalMs) {
-    return { ready: false, reason: "interval_not_due" };
+  let nextPostAtMs = lastRunTime + intervalMs;
+  let reason = "interval_not_due";
+
+  if (Number.isFinite(startTime) && startTime > now.getTime()) {
+    nextPostAtMs = startTime;
+    reason = "waiting_for_start_time";
   }
 
-  return { ready: true, reason: "due" };
+  if (!Number.isFinite(nextPostAtMs) || nextPostAtMs <= 0) {
+    nextPostAtMs = now.getTime();
+  }
+
+  const nextPostInMs = Math.max(0, nextPostAtMs - now.getTime());
+
+  return {
+    enabled: true,
+    due: nextPostInMs === 0,
+    reason: nextPostInMs === 0 ? "due" : reason,
+    intervalMinutes: Math.max(5, group.intervalMinutes || 30),
+    nextPostAt: new Date(nextPostAtMs).toISOString(),
+    nextPostInMs,
+    nextPostInSeconds: Math.ceil(nextPostInMs / 1000),
+    countdown: formatDuration(nextPostInMs),
+    lastScheduledPostAt: group.lastScheduledPostAt || null,
+    lastScheduledAttemptAt: group.lastScheduledAttemptAt || null,
+    postsSent: Number(group.postsSent || 0),
+    postLimit: group.postLimit || null,
+    postsRemaining: Number.isInteger(group.postLimit)
+      ? Math.max(0, group.postLimit - Number(group.postsSent || 0))
+      : null,
+  };
+}
+
+function addScheduleStatus(group, now = new Date()) {
+  return {
+    ...group,
+    schedule: getScheduleStatus(group, now),
+  };
+}
+
+function addScheduleStatuses(groups, now = new Date()) {
+  return Object.fromEntries(
+    Object.entries(groups).map(([chatId, group]) => [chatId, addScheduleStatus(group, now)])
+  );
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) return `${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours <= 0) return `${minutes}m ${seconds}s`;
+  return `${hours}h ${remainingMinutes}m ${seconds}s`;
+}
+
+function formatScheduleLines(group, now = new Date()) {
+  const status = group.schedule || getScheduleStatus(group, now);
+
+  if (!status.enabled) {
+    return [`Next post: not scheduled (${status.reason})`];
+  }
+
+  return [
+    `Next post: ${status.due ? "due now" : status.countdown}`,
+    `Next post at: ${status.nextPostAt}`,
+    status.postLimit ? `Posts remaining: ${status.postsRemaining}` : null,
+  ].filter(Boolean);
 }
 
 function latestTimestamp(...values) {
@@ -1244,6 +1332,7 @@ function formatGroupConfig(chatId, group) {
     `Limit: ${group.postLimit || "none"}`,
     `Start: ${group.postAt || "now"}`,
     `Posts sent: ${group.postsSent || 0}`,
+    ...formatScheduleLines(group),
   ].join("\n");
 }
 

@@ -80,7 +80,7 @@ url = https://tel-news-bot-ivory.vercel.app/webhook/telegram
 
 ## 4. Bot Runtime Status
 
-Purpose: Check bot runtime mode, topics, and whether admin restriction is active.
+Purpose: Check bot runtime mode, topics, whether admin restriction is active, and the schedule countdown for each saved chat.
 
 ```text
 Method: GET
@@ -296,6 +296,7 @@ Body:
 Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
 
 Important: Vercel/serverless does not keep `setInterval` running after a request ends. This route is what makes scheduled posting work on the live URL.
+Use the `schedules` object in the response to see `nextPostAt`, `nextPostInSeconds`, and `countdown`.
 
 ```text
 Method: GET
@@ -313,6 +314,20 @@ Expected shape:
   "checked": 1,
   "posted": 0,
   "skipped": 1,
+  "schedules": {
+    "-1002195390106": {
+      "enabled": true,
+      "due": false,
+      "reason": "interval_not_due",
+      "intervalMinutes": 15,
+      "nextPostAt": "2026-07-08T12:15:00.000Z",
+      "nextPostInSeconds": 600,
+      "countdown": "10m 0s",
+      "postsSent": 0,
+      "postLimit": 10,
+      "postsRemaining": 10
+    }
+  },
   "errors": []
 }
 ```
@@ -336,7 +351,7 @@ Body: none
 
 ## 15. Get One Channel Config
 
-Purpose: See config for one channel.
+Purpose: See config for one channel, including `schedule.countdown` and `schedule.nextPostAt`.
 
 ```text
 Method: GET

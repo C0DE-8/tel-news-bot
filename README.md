@@ -58,6 +58,7 @@ Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` butt
 The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
 On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
+Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.
 Admin controls and posting feedback go to the private admin chat. Channels/groups only receive news posts and test messages.
 
 ## HTTP Routes
