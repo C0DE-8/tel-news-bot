@@ -59,6 +59,14 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/admin/news-start") {
+      const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
+      const group = controller.startNews(payload.chatId);
+      sendJson(res, 200, { ok: true, group });
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/admin/group-check") {
       const payload = await readJsonBody(req);
       requireHttpAdmin(req, payload);
@@ -91,6 +99,7 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
         "GET /admin/groups",
         "GET /admin/news-config/:chatId",
         "POST /admin/news-config",
+        "POST /admin/news-start",
         "POST /admin/news-stop",
         "POST /admin/group-check",
         "GET /admin/group-check/:chatId",

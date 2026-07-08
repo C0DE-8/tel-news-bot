@@ -15,13 +15,13 @@ Content-Type: application/json
 Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
 Scheduled posting on Vercel uses `/cron/post-news`. If you set `CRON_SECRET` on the server, pass the same value as `?secret=...` or `x-cron-secret`; if you leave `CRON_SECRET` empty, no cron header is needed.
 
-On Vercel, also set this environment variable so the bot always knows which group to post into:
+On Vercel, also set this environment variable so the bot always knows which channel to post into:
 
 ```text
-TELEGRAM_GROUP_CHAT_IDS=-4586389005|Main News Group
+TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
 ```
 
-Use the real Telegram group id. Group ids are usually negative numbers.
+Use the real Telegram channel id. Channel ids are usually negative numbers.
 
 ## 1. Health Check
 
@@ -89,9 +89,9 @@ Headers: none
 Body: none
 ```
 
-## 5. List Known Groups
+## 5. List Known Groups/Channels
 
-Purpose: See groups the bot has learned from Telegram updates.
+Purpose: See groups/channels the bot has learned from Telegram updates.
 
 ```text
 Method: GET
@@ -100,7 +100,7 @@ Headers: none
 Body: none
 ```
 
-Important: Telegram does not let bots list every group they are in. The bot learns a group after it receives `my_chat_member` from Telegram or any message/update from that group.
+Important: Telegram does not let bots list every group/channel they are in. The bot learns a channel after it receives `my_chat_member` from Telegram. Keep `TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward` on Vercel so the channel always appears.
 
 ## 6. Telegram Webhook Receiver
 
@@ -119,9 +119,9 @@ Body:
   "update_id": 10030,
   "my_chat_member": {
     "chat": {
-      "id": "-4586389005",
-      "type": "group",
-      "title": "My Test Group"
+      "id": "-1002195390106",
+      "type": "channel",
+      "title": "Liberty forward"
     },
     "from": {
       "id": "6112214313"
@@ -136,7 +136,7 @@ Body:
 }
 ```
 
-Use this only to simulate Telegram telling the bot it was added to a group.
+Use this only to simulate Telegram telling the bot it was added to a channel.
 
 ## 7. Test Update Router
 
@@ -159,18 +159,18 @@ Body:
       "id": "6112214313"
     },
     "chat": {
-      "id": "-4586389005",
-      "type": "group",
-      "title": "My Test Group"
+      "id": "-1002195390106",
+      "type": "channel",
+      "title": "Liberty forward"
     },
     "text": "/start"
   }
 }
 ```
 
-## 8. Check Group Access
+## 8. Check Channel Access
 
-Purpose: Ask Telegram whether the bot can see the group and whether it can post.
+Purpose: Ask Telegram whether the bot can see the channel and whether it can post.
 
 ```text
 Method: POST
@@ -182,7 +182,7 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005"
+  "chatId": "-1002195390106"
 }
 ```
 
@@ -193,11 +193,11 @@ membership.status
 canPost
 ```
 
-## 9. Send Test Message To Group
+## 9. Send Test Message To Channel
 
-Purpose: Verify the bot can send a real message into the selected group.
+Purpose: Verify the bot can send a real message into the selected channel.
 
-Important: `chatId` must be the group id, not your private Telegram user/admin id. If you put your private id here, Telegram will send the message to you.
+Important: `chatId` must be the channel id, not your private Telegram user/admin id. If you put your private id here, Telegram will send the message to you.
 
 ```text
 Method: POST
@@ -209,16 +209,16 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005",
+  "chatId": "-1002195390106",
   "text": "Test message from the news bot."
 }
 ```
 
 ## 10. Configure News Posting
 
-Purpose: Configure the group to receive news over time.
+Purpose: Configure the channel to receive news over time.
 
-Important: `chatId` must be the group id, not your private Telegram user/admin id.
+Important: `chatId` must be the channel id, not your private Telegram user/admin id.
 
 ```text
 Method: POST
@@ -230,7 +230,7 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005",
+  "chatId": "-1002195390106",
   "topic": "crypto",
   "intervalMinutes": 30,
   "postLimit": 10,
@@ -259,7 +259,7 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005",
+  "chatId": "-1002195390106",
   "topic": "politics",
   "intervalMinutes": 60,
   "postLimit": 5,
@@ -271,7 +271,7 @@ Body:
 
 Purpose: Save config and immediately send one news item.
 
-Manual immediate posts have a 1-minute cooldown per group. If you trigger another immediate post too soon, the bot will ask you to wait.
+Manual immediate posts have a 10-second cooldown per group/channel. If you trigger another immediate post too soon, the bot will ask you to wait.
 
 ```text
 Method: POST
@@ -283,7 +283,7 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005",
+  "chatId": "-1002195390106",
   "topic": "crypto",
   "intervalMinutes": 30,
   "postLimit": 3,
@@ -293,7 +293,7 @@ Body:
 
 ## 13. Run Scheduled Post Check
 
-Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group and only posts when the group's interval is due.
+Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
 
 Important: Vercel/serverless does not keep `setInterval` running after a request ends. This route is what makes scheduled posting work on the live URL.
 
@@ -325,7 +325,7 @@ URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
 
 ## 14. Get All News Configs
 
-Purpose: See all saved group news configs.
+Purpose: See all saved group/channel news configs.
 
 ```text
 Method: GET
@@ -334,20 +334,38 @@ Headers: none
 Body: none
 ```
 
-## 15. Get One Group Config
+## 15. Get One Channel Config
 
-Purpose: See config for one group.
+Purpose: See config for one channel.
 
 ```text
 Method: GET
-URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/-4586389005
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/-1002195390106
 Headers: none
 Body: none
 ```
 
-## 16. Stop News For Group
+## 16. Start News For Channel
 
-Purpose: Disable scheduled posting for a group.
+Purpose: Re-enable scheduled posting for the channel after it was stopped.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-start
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "chatId": "-1002195390106"
+}
+```
+
+## 17. Stop News For Channel
+
+Purpose: Disable scheduled posting for the channel.
 
 ```text
 Method: POST
@@ -359,11 +377,11 @@ Body:
 
 ```json
 {
-  "chatId": "-4586389005"
+  "chatId": "-1002195390106"
 }
 ```
 
-## 17. Delete Telegram Webhook
+## 18. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 
@@ -379,8 +397,8 @@ Body: none
 1. `GET /health`
 2. `POST /webhook/telegram/set`
 3. `GET /webhook/telegram/info`
-4. Add bot to your Telegram group and make it admin
-5. Send any message in the group, or wait for Telegram `my_chat_member`
+4. Add bot to your Telegram channel and make it admin
+5. Wait for Telegram `my_chat_member`, or keep the channel in `TELEGRAM_GROUP_CHAT_IDS`
 6. `GET /admin/groups`
 7. `POST /admin/group-check`
 8. `POST /admin/group-test-message`
@@ -391,5 +409,5 @@ Body: none
 
 ```text
 ADMIN_USER_ID = 6112214313
-CHAT_ID = -4586389005
+CHAT_ID = -1002195390106
 ```

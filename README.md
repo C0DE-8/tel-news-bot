@@ -1,6 +1,6 @@
 # tel-news-bot
 
-A Telegram bot that posts real news into groups on a schedule. Each group can choose the type of news it wants:
+A Telegram bot that posts real news into Telegram groups or channels on a schedule. Each chat can choose the type of news it wants:
 
 - `crypto`
 - `politics`
@@ -15,7 +15,7 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=6112214313
-TELEGRAM_GROUP_CHAT_IDS=-4586389005|Main News Group
+TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
 CRON_SECRET=
 ```
 
@@ -46,18 +46,19 @@ Set news
 Check group
 Send test
 Send news now
+Start
 Stop
 List configs
 ```
 
-The bot stores group settings in `backend/data/groups.json`.
+The bot stores chat settings in `backend/data/groups.json`.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
-The group picker shows groups from `TELEGRAM_GROUP_CHAT_IDS` plus groups the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
-Manual `Send news now` clicks have a 1-minute cooldown per group.
-On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a group is due.
-Admin controls and posting feedback go to the private admin chat. Groups only receive news posts and test messages.
+The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
+Manual `Send news now` clicks have a 10-second cooldown per group/channel.
+On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
+Admin controls and posting feedback go to the private admin chat. Channels/groups only receive news posts and test messages.
 
 ## HTTP Routes
 
@@ -68,6 +69,7 @@ GET /admin/news-config
 GET /admin/groups
 GET /admin/news-config/:chatId
 POST /admin/news-config
+POST /admin/news-start
 POST /admin/news-stop
 POST /admin/group-check
 GET /admin/group-check/:chatId

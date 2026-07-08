@@ -6,7 +6,7 @@ const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? path.join("/tmp",
 const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
-const MANUAL_POST_COOLDOWN_MS = 60 * 1000;
+const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const SCHEDULED_POST_COOLDOWN_MS = 60 * 1000;
 
 const NEWS_TOPICS = {
@@ -210,6 +210,29 @@ class NewsBot {
     return groups[normalizedChatId];
   }
 
+  enableGroup(chatId) {
+    ensureDataFiles();
+
+    const normalizedChatId = String(chatId || "").trim();
+    if (!normalizedChatId) throwHttpError(400, "chatId is required");
+
+    const groups = readJson(GROUPS_FILE);
+    const current = groups[normalizedChatId];
+    if (!current?.topic || !NEWS_TOPICS[current.topic]) {
+      throwHttpError(404, "No saved news config found. Set news for this chat first.");
+    }
+
+    groups[normalizedChatId] = {
+      ...current,
+      enabled: true,
+      updatedAt: new Date().toISOString(),
+    };
+    writeJson(GROUPS_FILE, groups);
+    this.scheduleGroup(normalizedChatId, groups[normalizedChatId]);
+
+    return groups[normalizedChatId];
+  }
+
   async handleTelegramUpdate(update) {
     if (update.message) {
       this.rememberChat(update.message.chat);
@@ -409,7 +432,7 @@ class NewsBot {
 
       if (action === "groups") {
         await this.sendGroupPicker(chatId);
-        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
+        await this.answerCallbackQuery(callbackQuery.id, "Pick chat.");
         return;
       }
 
@@ -418,7 +441,7 @@ class NewsBot {
         await this.sendMessage(chatId, `Managing ${formatChatLabel(group || { id: targetChatId })}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
-        await this.answerCallbackQuery(callbackQuery.id, "Group selected.");
+        await this.answerCallbackQuery(callbackQuery.id, "Chat selected.");
         return;
       }
 
@@ -480,7 +503,7 @@ class NewsBot {
         await this.sendMessage(chatId, formatGroupAccess(result), {
           replyMarkup: adminKeyboard(targetChatId),
         });
-        await this.answerCallbackQuery(callbackQuery.id, "Group checked.");
+        await this.answerCallbackQuery(callbackQuery.id, "Chat checked.");
         return;
       }
 
@@ -514,6 +537,15 @@ class NewsBot {
         return;
       }
 
+      if (action === "start") {
+        const group = this.enableGroup(targetChatId);
+        await this.sendMessage(chatId, `News started for ${targetChatId}.\n${formatGroupConfig(targetChatId, group)}`, {
+          replyMarkup: adminKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Started.");
+        return;
+      }
+
       if (action === "list") {
         await this.handleAdminList(chatId);
         await this.answerCallbackQuery(callbackQuery.id, "List sent.");
@@ -542,7 +574,7 @@ class NewsBot {
     if (action === "status") {
       if (!isLikelyGroupChatId(targetChatId)) {
         await this.sendGroupPicker(chatId);
-        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
+        await this.answerCallbackQuery(callbackQuery.id, "Pick chat.");
         return;
       }
 
@@ -559,7 +591,7 @@ class NewsBot {
 
       if (!isLikelyGroupChatId(targetChatId)) {
         await this.sendGroupPicker(chatId);
-        await this.answerCallbackQuery(callbackQuery.id, "Pick group.");
+        await this.answerCallbackQuery(callbackQuery.id, "Pick chat.");
         return;
       }
 
@@ -626,8 +658,8 @@ class NewsBot {
   async sendAdminHelp(chatId, includeButtons = false) {
     const knownGroups = this.listKnownGroups();
     const text = knownGroups.length
-      ? "Admin panel\nPick a group below, then choose what the bot should do."
-      : "Admin panel\nNo known groups yet. Send any message in the group while the bot is running, then open this panel again.";
+      ? "Admin panel\nPick a chat below, then choose what the bot should do."
+      : "Admin panel\nNo known chats yet. Add the bot to a channel/group or set TELEGRAM_GROUP_CHAT_IDS, then open this panel again.";
 
     await this.sendMessage(
       chatId,
@@ -644,14 +676,14 @@ class NewsBot {
 
   async sendAdminPanel(chatId) {
     const knownGroups = this.listKnownGroups();
-    await this.sendMessage(chatId, "Admin panel\nPick a group to manage.", {
+    await this.sendMessage(chatId, "Admin panel\nPick a chat to manage.", {
       replyMarkup: adminHomeKeyboard(chatId, knownGroups),
     });
   }
 
   async sendGroupPicker(chatId) {
     const knownGroups = this.listKnownGroups();
-    await this.sendMessage(chatId, knownGroups.length ? "Pick a group." : "No known groups yet.", {
+    await this.sendMessage(chatId, knownGroups.length ? "Pick a chat." : "No known chats yet.", {
       replyMarkup: groupPickerKeyboard(chatId, knownGroups),
     });
   }
@@ -723,7 +755,7 @@ class NewsBot {
         replyMarkup: adminKeyboard(targetChatId),
       });
     } catch (error) {
-      await this.sendMessage(currentChatId, `Group check failed: ${error.message}`);
+      await this.sendMessage(currentChatId, `Chat check failed: ${error.message}`);
     }
   }
 
@@ -731,7 +763,7 @@ class NewsBot {
     const groups = this.listGroupConfigs();
     const lines = Object.entries(groups).map(([groupChatId, group]) => formatGroupConfig(groupChatId, group));
 
-    await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No group configs saved yet.");
+    await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No chat configs saved yet.");
   }
 
   async setNewsTopic(chatId, topic) {
@@ -1220,12 +1252,13 @@ function formatGroupAccess(result) {
   const member = result.membership;
 
   return [
-    `Group check for ${chatTitle}`,
+    `Chat check for ${chatTitle}`,
     `Chat id: ${result.chatId}`,
     `Bot: @${result.bot.username || result.bot.first_name}`,
     `Bot status: ${member.status}`,
     `Can post: ${result.canPost ? "yes" : "no"}`,
     member.can_send_messages === false ? "Reason: can_send_messages is false" : null,
+    member.can_post_messages === false ? "Reason: can_post_messages is false" : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1234,6 +1267,7 @@ function formatGroupAccess(result) {
 function canBotPost(member) {
   if (!member || member.status === "left" || member.status === "kicked") return false;
   if (member.status === "restricted") return member.can_send_messages !== false;
+  if (member.can_post_messages === false) return false;
   return ["creator", "administrator", "member"].includes(member.status);
 }
 
@@ -1256,17 +1290,17 @@ function adminHomeKeyboard(currentChatId, knownGroups) {
   const rows = [];
 
   if (knownGroups.length) {
-    rows.push([{ text: "Pick group", callback_data: "admin:groups:this" }]);
+    rows.push([{ text: "Pick chat", callback_data: "admin:groups:this" }]);
     for (const group of knownGroups.slice(0, 8)) {
       rows.push([{ text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` }]);
     }
   }
 
   if (isLikelyGroupChatId(currentChatId)) {
-    rows.push([{ text: "Manage this group", callback_data: `admin:group:${currentChatId}` }]);
+    rows.push([{ text: "Manage this chat", callback_data: `admin:group:${currentChatId}` }]);
   }
 
-  rows.push([{ text: "Refresh groups", callback_data: "admin:groups:this" }]);
+  rows.push([{ text: "Refresh chats", callback_data: "admin:groups:this" }]);
   rows.push([{ text: "Admin ID", callback_data: "admin:id:this" }]);
 
   return { inline_keyboard: rows };
@@ -1278,7 +1312,7 @@ function groupPickerKeyboard(currentChatId, knownGroups) {
   ]);
 
   if (isLikelyGroupChatId(currentChatId)) {
-    rows.push([{ text: "This group", callback_data: `admin:group:${currentChatId}` }]);
+    rows.push([{ text: "This chat", callback_data: `admin:group:${currentChatId}` }]);
   }
 
   rows.push([{ text: "Back", callback_data: "admin:panel:this" }]);
@@ -1296,11 +1330,14 @@ function adminKeyboard(targetChatId = "this") {
         { text: "Send news now", callback_data: `admin:post:${targetChatId}` },
       ],
       [
-        { text: "Check group", callback_data: `admin:check:${targetChatId}` },
+        { text: "Check chat", callback_data: `admin:check:${targetChatId}` },
         { text: "Send test", callback_data: `admin:test:${targetChatId}` },
       ],
       [
+        { text: "Start", callback_data: `admin:start:${targetChatId}` },
         { text: "Stop", callback_data: `admin:stop:${targetChatId}` },
+      ],
+      [
         { text: "List configs", callback_data: "admin:list" },
       ],
     ],
