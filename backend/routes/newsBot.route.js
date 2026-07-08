@@ -434,6 +434,12 @@ class NewsBot {
         return;
       }
 
+      if (action === "main") {
+        await this.sendMainMenu(chatId);
+        await this.answerCallbackQuery(callbackQuery.id, "Main menu opened.");
+        return;
+      }
+
       if (action === "groups") {
         await this.sendGroupPicker(chatId);
         await this.answerCallbackQuery(callbackQuery.id, "Pick chat.");
@@ -450,7 +456,9 @@ class NewsBot {
       }
 
       if (action === "id") {
-        await this.sendMessage(chatId, `Your admin id: ${callbackQuery.from?.id || "unknown"}\nThis chat id: ${chatId}`);
+        await this.sendMessage(chatId, `Your admin id: ${callbackQuery.from?.id || "unknown"}\nThis chat id: ${chatId}`, {
+          replyMarkup: adminHomeKeyboard(chatId, this.listKnownGroups()),
+        });
         await this.answerCallbackQuery(callbackQuery.id, "ID sent.");
         return;
       }
@@ -499,6 +507,15 @@ class NewsBot {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Status sent.");
+        return;
+      }
+
+      if (action === "cron") {
+        const group = this.getGroupConfig(targetChatId);
+        await this.sendMessage(chatId, group ? formatCronStatus(targetChatId, group) : `No config found for ${targetChatId}.`, {
+          replyMarkup: adminKeyboard(targetChatId),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Cron status sent.");
         return;
       }
 
@@ -767,7 +784,9 @@ class NewsBot {
     const groups = this.listGroupConfigs();
     const lines = Object.entries(groups).map(([groupChatId, group]) => formatGroupConfig(groupChatId, group));
 
-    await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No chat configs saved yet.");
+    await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No chat configs saved yet.", {
+      replyMarkup: adminHomeKeyboard(chatId, this.listKnownGroups()),
+    });
   }
 
   async setNewsTopic(chatId, topic) {
@@ -1336,6 +1355,27 @@ function formatGroupConfig(chatId, group) {
   ].join("\n");
 }
 
+function formatCronStatus(chatId, group) {
+  const status = group.schedule || getScheduleStatus(group);
+
+  return [
+    `Cron status for ${chatId}`,
+    `Enabled: ${status.enabled ? "yes" : "no"}`,
+    `Due: ${status.due ? "yes" : "no"}`,
+    `Reason: ${status.reason}`,
+    `Interval: ${status.intervalMinutes || group.intervalMinutes || "not set"} minutes`,
+    status.enabled ? `Next post: ${status.due ? "due now" : status.countdown}` : null,
+    status.enabled ? `Next post at: ${status.nextPostAt}` : null,
+    `Posts sent: ${status.postsSent ?? Number(group.postsSent || 0)}`,
+    status.postLimit ? `Post limit: ${status.postLimit}` : "Post limit: none",
+    status.postLimit ? `Posts remaining: ${status.postsRemaining}` : null,
+    `Last post: ${status.lastScheduledPostAt || "none"}`,
+    `Last cron check: ${status.lastScheduledAttemptAt || "none"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function formatGroupAccess(result) {
   const chatTitle = result.chat.title || result.chat.username || result.chat.id;
   const member = result.membership;
@@ -1391,6 +1431,7 @@ function adminHomeKeyboard(currentChatId, knownGroups) {
 
   rows.push([{ text: "Refresh chats", callback_data: "admin:groups:this" }]);
   rows.push([{ text: "Admin ID", callback_data: "admin:id:this" }]);
+  rows.push([{ text: "Main menu", callback_data: "admin:main:this" }]);
 
   return { inline_keyboard: rows };
 }
@@ -1416,6 +1457,9 @@ function adminKeyboard(targetChatId = "this") {
       ],
       [
         { text: "Status", callback_data: `admin:status:${targetChatId}` },
+        { text: "Cron status", callback_data: `admin:cron:${targetChatId}` },
+      ],
+      [
         { text: "Send news now", callback_data: `admin:post:${targetChatId}` },
       ],
       [
@@ -1429,6 +1473,10 @@ function adminKeyboard(targetChatId = "this") {
       [
         { text: "List configs", callback_data: "admin:list" },
       ],
+      [
+        { text: "Back", callback_data: "admin:groups:this" },
+        { text: "Main menu", callback_data: "admin:main:this" },
+      ],
     ],
   };
 }
@@ -1440,7 +1488,7 @@ function topicKeyboard(targetChatId) {
         { text: "Crypto", callback_data: `admin:topic:${targetChatId}:crypto` },
         { text: "Politics", callback_data: `admin:topic:${targetChatId}:politics` },
       ],
-      [{ text: "Back", callback_data: `admin:panel:${targetChatId}` }],
+      [{ text: "Back", callback_data: `admin:group:${targetChatId}` }],
     ],
   };
 }

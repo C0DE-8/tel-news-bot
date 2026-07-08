@@ -39,6 +39,7 @@ Press the bot's `Start` button once to open the button menu. After that, manage 
 
 ```text
 Status
+Cron status
 Send news now
 Admin panel
 Admin ID
@@ -48,6 +49,8 @@ Send test
 Send news now
 Start
 Stop
+Back
+Main menu
 List configs
 ```
 
