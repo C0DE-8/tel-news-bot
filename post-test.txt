@@ -55,11 +55,17 @@ Body:
 ```json
 {
   "url": "https://tel-news-bot-ivory.vercel.app/webhook/telegram",
+  "allowedUpdates": [
+    "message",
+    "channel_post",
+    "callback_query",
+    "my_chat_member"
+  ],
   "dropPendingUpdates": true
 }
 ```
 
-Use `dropPendingUpdates: true` after a webhook error like `500 Internal Server Error`. That clears Telegram's retry queue so old failed updates do not keep replaying.
+Use `dropPendingUpdates: true` after a webhook error like `500 Internal Server Error`. That clears Telegram's retry queue so old failed updates do not keep replaying. Keep `channel_post` in `allowedUpdates` so the bot can read channel posts.
 
 ## 3. Check Webhook Info
 
@@ -168,7 +174,81 @@ Body:
 }
 ```
 
-## 8. Check Channel Access
+## 8. Test Investment Code Reply
+
+Purpose: Simulate a message containing an `LF-IPC` investment code. The bot should reply in the same chat with `https://zephyrequi.com is the investment site.`
+
+Allowed code format:
+
+```text
+LF-IPC-{TIER_ID}-{LAST4_OF_REF}{6_HEX}
+```
+
+Allowed tiers:
+
+```text
+CIVIC
+STEWAR
+SELECT
+DISTIN
+```
+
+Group/message simulation:
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/test/update
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "update_id": 10032,
+  "message": {
+    "message_id": 2,
+    "from": {
+      "id": "6112214313"
+    },
+    "chat": {
+      "id": "-1002195390106",
+      "type": "channel",
+      "title": "Liberty forward"
+    },
+    "text": "Please check LF-IPC-CIVIC-XXXXAABBCC"
+  }
+}
+```
+
+Channel post simulation:
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/test/update
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "update_id": 10033,
+  "channel_post": {
+    "message_id": 3,
+    "chat": {
+      "id": "-1002195390106",
+      "type": "channel",
+      "title": "Liberty forward"
+    },
+    "text": "LF-IPC-SELECT-XXXXAABBCC"
+  }
+}
+```
+
+Important: after deploying this update, reset the Telegram webhook with `dropPendingUpdates: true` so Telegram uses the new `channel_post` allowed update.
+
+## 9. Check Channel Access
 
 Purpose: Ask Telegram whether the bot can see the channel and whether it can post.
 
@@ -193,7 +273,7 @@ membership.status
 canPost
 ```
 
-## 9. Send Test Message To Channel
+## 10. Send Test Message To Channel
 
 Purpose: Verify the bot can send a real message into the selected channel.
 
@@ -214,7 +294,7 @@ Body:
 }
 ```
 
-## 10. Configure News Posting
+## 11. Configure News Posting
 
 Purpose: Configure the channel to receive news over time.
 
@@ -245,7 +325,7 @@ crypto
 politics
 ```
 
-## 11. Configure Politics News
+## 12. Configure Politics News
 
 Purpose: Same as above, but politics.
 
@@ -267,7 +347,7 @@ Body:
 }
 ```
 
-## 12. Configure And Post Immediately
+## 13. Configure And Post Immediately
 
 Purpose: Save config and immediately send one news item.
 
@@ -291,7 +371,7 @@ Body:
 }
 ```
 
-## 13. Run Scheduled Post Check
+## 14. Run Scheduled Post Check
 
 Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
 
@@ -338,7 +418,7 @@ If you set `CRON_SECRET`, use:
 URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
 ```
 
-## 14. Get All News Configs
+## 15. Get All News Configs
 
 Purpose: See all saved group/channel news configs.
 
@@ -349,7 +429,7 @@ Headers: none
 Body: none
 ```
 
-## 15. Get One Channel Config
+## 16. Get One Channel Config
 
 Purpose: See config for one channel, including `schedule.countdown` and `schedule.nextPostAt`.
 
@@ -360,7 +440,7 @@ Headers: none
 Body: none
 ```
 
-## 16. Start News For Channel
+## 17. Start News For Channel
 
 Purpose: Re-enable scheduled posting for the channel after it was stopped.
 
@@ -378,7 +458,7 @@ Body:
 }
 ```
 
-## 17. Stop News For Channel
+## 18. Stop News For Channel
 
 Purpose: Disable scheduled posting for the channel.
 
@@ -396,7 +476,7 @@ Body:
 }
 ```
 
-## 18. Delete Telegram Webhook
+## 19. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 

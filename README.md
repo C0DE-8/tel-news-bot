@@ -63,6 +63,7 @@ Manual `Send news now` clicks have a 10-second cooldown per group/channel.
 On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.
 Admin controls and posting feedback go to the private admin chat. Channels/groups only receive news posts and test messages.
+If a group or channel message contains a code like `LF-IPC-CIVIC-XXXXAABBCC`, the bot replies with `https://zephyrequi.com is the investment site.` For channels, the Telegram webhook must allow `channel_post`.
 
 ## HTTP Routes
 

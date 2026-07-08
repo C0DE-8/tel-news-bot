@@ -7,6 +7,9 @@ const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
 const POSTED_FILE = path.join(DATA_DIR, "posted.json");
 const CHATS_FILE = path.join(DATA_DIR, "chats.json");
 const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
+const INVESTMENT_SITE_URL = "https://zephyrequi.com";
+const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
+const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
 
 const NEWS_TOPICS = {
   crypto: [
@@ -244,6 +247,12 @@ class NewsBot {
       return;
     }
 
+    if (update.channel_post) {
+      this.rememberChat(update.channel_post.chat);
+      if (update.channel_post.text) await this.handleMessage(update.channel_post);
+      return;
+    }
+
     if (update.callback_query) {
       this.rememberChat(update.callback_query.message?.chat);
       await this.handleCallbackQuery(update.callback_query);
@@ -285,7 +294,7 @@ class NewsBot {
         const updates = await this.telegram("getUpdates", {
           offset: this.offset,
           timeout: 25,
-          allowed_updates: ["message", "callback_query", "my_chat_member"],
+          allowed_updates: TELEGRAM_ALLOWED_UPDATES,
         });
 
         for (const update of updates.result || []) {
@@ -303,6 +312,9 @@ class NewsBot {
     const chatId = String(message.chat.id);
     const userId = String(message.from?.id || "");
     const text = message.text.trim();
+
+    if (await this.handleInvestmentCodeMessage(message, text)) return;
+
     const [commandWithBotName, ...args] = text.split(/\s+/);
     const arg = args[0];
     const command = commandWithBotName.split("@")[0].toLowerCase();
@@ -396,6 +408,13 @@ class NewsBot {
       if (!(await this.requireAdmin(message))) return;
       await this.stopNews(chatId);
     }
+  }
+
+  async handleInvestmentCodeMessage(message, text) {
+    if (!INVESTMENT_CODE_REGEX.test(text)) return false;
+
+    await this.sendMessage(String(message.chat.id), `${INVESTMENT_SITE_URL} is the investment site.`);
+    return true;
   }
 
   async handleCallbackQuery(callbackQuery) {
@@ -1130,7 +1149,7 @@ class NewsBot {
 
     return this.telegram("setWebhook", {
       url,
-      allowed_updates: options.allowedUpdates || ["message", "callback_query", "my_chat_member"],
+      allowed_updates: options.allowedUpdates || TELEGRAM_ALLOWED_UPDATES,
       drop_pending_updates: options.dropPendingUpdates === true,
     });
   }
