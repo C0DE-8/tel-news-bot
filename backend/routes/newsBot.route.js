@@ -1,11 +1,9 @@
-const fs = require("fs");
-const path = require("path");
+const db = require("../db");
 const { getPathname, sendJson } = require("../utils/http");
 
-const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? path.join("/tmp", "tel-news-bot-data") : path.join(__dirname, "..", "data"));
-const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
-const POSTED_FILE = path.join(DATA_DIR, "posted.json");
-const CHATS_FILE = path.join(DATA_DIR, "chats.json");
+const GROUPS_STORE = "groups";
+const POSTED_STORE = "posted";
+const CHATS_STORE = "chats";
 const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
@@ -44,7 +42,7 @@ async function handleRoute(req, res, bot, requireHttpAdmin) {
   try {
     if (req.method === "GET" && pathname === "/bot/status") {
       requireHttpAdmin(req);
-      sendJson(res, 200, bot.getStatus());
+      sendJson(res, 200, await bot.getStatus());
       return;
     }
 
@@ -83,11 +81,17 @@ class NewsBot {
       return;
     }
 
-    ensureDataFiles();
+    this.initializeStorageAndRuntime().catch((error) => {
+      console.error("Failed initializing news bot storage:", error.message);
+    });
+  }
+
+  async initializeStorageAndRuntime() {
+    await ensureDataStore();
     if (process.env.VERCEL) {
       console.log("Vercel runtime detected. Scheduled posts use /cron/post-news.");
     } else {
-      this.restoreScheduledPosts();
+      await this.restoreScheduledPosts();
     }
 
     if (this.useWebhook) {
@@ -98,8 +102,8 @@ class NewsBot {
     this.startTelegramPolling();
   }
 
-  getStatus() {
-    const groups = fs.existsSync(GROUPS_FILE) ? readJson(GROUPS_FILE) : {};
+  async getStatus() {
+    const groups = await readJson(GROUPS_STORE);
     const activeGroups = Object.values(groups).filter((group) => group.enabled).length;
     const now = new Date();
 
@@ -117,14 +121,12 @@ class NewsBot {
     };
   }
 
-  listGroupConfigs() {
-    ensureDataFiles();
-    return addScheduleStatuses(readJson(GROUPS_FILE));
+  async listGroupConfigs() {
+    return addScheduleStatuses(await readJson(GROUPS_STORE));
   }
 
-  listKnownGroups() {
-    ensureDataFiles();
-    const chats = readJson(CHATS_FILE);
+  async listKnownGroups() {
+    const chats = await readJson(CHATS_STORE);
     const learnedGroups = Object.values(chats).filter((chat) => isGroupChatType(chat.type));
     const groups = new Map();
 
@@ -134,15 +136,12 @@ class NewsBot {
     return [...groups.values()];
   }
 
-  getGroupConfig(chatId) {
-    ensureDataFiles();
-    const group = readJson(GROUPS_FILE)[String(chatId)] || null;
+  async getGroupConfig(chatId) {
+    const group = (await readJson(GROUPS_STORE))[String(chatId)] || null;
     return group ? addScheduleStatus(group) : null;
   }
 
   async configureGroup(payload) {
-    ensureDataFiles();
-
     const chatId = String(payload.chatId || "").trim();
     const topic = String(payload.topic || "").toLowerCase();
     const intervalMinutes = Number(payload.intervalMinutes || this.defaultIntervalMinutes);
@@ -156,7 +155,7 @@ class NewsBot {
       throwHttpError(400, "intervalMinutes must be a whole number from 5 to 1440");
     }
 
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const current = groups[chatId] || {};
 
     groups[chatId] = {
@@ -171,7 +170,7 @@ class NewsBot {
       lastScheduledAttemptAt: current.lastScheduledAttemptAt || null,
       updatedAt: new Date().toISOString(),
     };
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
 
     if (enabled) {
       this.scheduleGroup(chatId, groups[chatId]);
@@ -198,32 +197,28 @@ class NewsBot {
     return addScheduleStatus(groups[chatId]);
   }
 
-  disableGroup(chatId) {
-    ensureDataFiles();
-
+  async disableGroup(chatId) {
     const normalizedChatId = String(chatId || "").trim();
     if (!normalizedChatId) throwHttpError(400, "chatId is required");
 
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const current = groups[normalizedChatId] || {};
     groups[normalizedChatId] = {
       ...current,
       enabled: false,
       updatedAt: new Date().toISOString(),
     };
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
     this.clearGroupTimer(normalizedChatId);
 
     return addScheduleStatus(groups[normalizedChatId]);
   }
 
-  enableGroup(chatId) {
-    ensureDataFiles();
-
+  async enableGroup(chatId) {
     const normalizedChatId = String(chatId || "").trim();
     if (!normalizedChatId) throwHttpError(400, "chatId is required");
 
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const current = groups[normalizedChatId];
     if (!current?.topic || !NEWS_TOPICS[current.topic]) {
       throwHttpError(404, "No saved news config found. Set news for this chat first.");
@@ -234,7 +229,7 @@ class NewsBot {
       enabled: true,
       updatedAt: new Date().toISOString(),
     };
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
     this.scheduleGroup(normalizedChatId, groups[normalizedChatId]);
 
     return addScheduleStatus(groups[normalizedChatId]);
@@ -242,33 +237,32 @@ class NewsBot {
 
   async handleTelegramUpdate(update) {
     if (update.message) {
-      this.rememberChat(update.message.chat);
+      await this.rememberChat(update.message.chat);
       if (update.message.text) await this.handleMessage(update.message);
       return;
     }
 
     if (update.channel_post) {
-      this.rememberChat(update.channel_post.chat);
+      await this.rememberChat(update.channel_post.chat);
       if (update.channel_post.text) await this.handleMessage(update.channel_post);
       return;
     }
 
     if (update.callback_query) {
-      this.rememberChat(update.callback_query.message?.chat);
+      await this.rememberChat(update.callback_query.message?.chat);
       await this.handleCallbackQuery(update.callback_query);
       return;
     }
 
     if (update.my_chat_member) {
-      this.rememberChat(update.my_chat_member.chat);
+      await this.rememberChat(update.my_chat_member.chat);
     }
   }
 
-  rememberChat(chat) {
+  async rememberChat(chat) {
     if (!chat?.id || !isGroupChatType(chat.type)) return;
 
-    ensureDataFiles();
-    const chats = readJson(CHATS_FILE);
+    const chats = await readJson(CHATS_STORE);
     const chatId = String(chat.id);
     chats[chatId] = {
       id: chatId,
@@ -277,7 +271,7 @@ class NewsBot {
       username: chat.username || null,
       updatedAt: new Date().toISOString(),
     };
-    writeJson(CHATS_FILE, chats);
+    await writeJson(CHATS_STORE, chats);
   }
 
   startTelegramPolling() {
@@ -466,7 +460,7 @@ class NewsBot {
       }
 
       if (action === "group") {
-        const group = this.listKnownGroups().find((knownGroup) => knownGroup.id === targetChatId);
+        const group = (await this.listKnownGroups()).find((knownGroup) => knownGroup.id === targetChatId);
         await this.sendMessage(chatId, `Managing ${formatChatLabel(group || { id: targetChatId })}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
@@ -476,7 +470,7 @@ class NewsBot {
 
       if (action === "id") {
         await this.sendMessage(chatId, `Your admin id: ${callbackQuery.from?.id || "unknown"}\nThis chat id: ${chatId}`, {
-          replyMarkup: adminHomeKeyboard(chatId, this.listKnownGroups()),
+          replyMarkup: adminHomeKeyboard(chatId, await this.listKnownGroups()),
         });
         await this.answerCallbackQuery(callbackQuery.id, "ID sent.");
         return;
@@ -521,7 +515,7 @@ class NewsBot {
       }
 
       if (action === "status") {
-        const group = this.getGroupConfig(targetChatId);
+        const group = await this.getGroupConfig(targetChatId);
         await this.sendMessage(chatId, group ? formatGroupConfig(targetChatId, group) : `No config found for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
@@ -530,7 +524,7 @@ class NewsBot {
       }
 
       if (action === "cron") {
-        const group = this.getGroupConfig(targetChatId);
+        const group = await this.getGroupConfig(targetChatId);
         await this.sendMessage(chatId, group ? formatCronStatus(targetChatId, group) : `No config found for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
@@ -569,7 +563,7 @@ class NewsBot {
       }
 
       if (action === "stop") {
-        this.disableGroup(targetChatId);
+        await this.disableGroup(targetChatId);
         await this.sendMessage(chatId, `News stopped for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
@@ -578,7 +572,7 @@ class NewsBot {
       }
 
       if (action === "start") {
-        const group = this.enableGroup(targetChatId);
+        const group = await this.enableGroup(targetChatId);
         await this.sendMessage(chatId, `News started for ${targetChatId}.\n${formatGroupConfig(targetChatId, group)}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
@@ -696,7 +690,7 @@ class NewsBot {
   }
 
   async sendAdminHelp(chatId, includeButtons = false) {
-    const knownGroups = this.listKnownGroups();
+    const knownGroups = await this.listKnownGroups();
     const text = knownGroups.length
       ? "Admin panel\nPick a chat below, then choose what the bot should do."
       : "Admin panel\nNo known chats yet. Add the bot to a channel/group or set TELEGRAM_GROUP_CHAT_IDS, then open this panel again.";
@@ -715,14 +709,14 @@ class NewsBot {
   }
 
   async sendAdminPanel(chatId) {
-    const knownGroups = this.listKnownGroups();
+    const knownGroups = await this.listKnownGroups();
     await this.sendMessage(chatId, "Admin panel\nPick a chat to manage.", {
       replyMarkup: adminHomeKeyboard(chatId, knownGroups),
     });
   }
 
   async sendGroupPicker(chatId) {
-    const knownGroups = this.listKnownGroups();
+    const knownGroups = await this.listKnownGroups();
     await this.sendMessage(chatId, knownGroups.length ? "Pick a chat." : "No known chats yet.", {
       replyMarkup: groupPickerKeyboard(chatId, knownGroups),
     });
@@ -767,7 +761,7 @@ class NewsBot {
     const targetChatId = normalizeTargetChatId(args[0], currentChatId);
 
     try {
-      this.disableGroup(targetChatId);
+      await this.disableGroup(targetChatId);
       await this.sendMessage(currentChatId, `News stopped for ${targetChatId}.`);
     } catch (error) {
       await this.sendMessage(currentChatId, `Stop failed: ${error.message}`);
@@ -776,7 +770,7 @@ class NewsBot {
 
   async handleAdminStatus(currentChatId, args) {
     const targetChatId = normalizeTargetChatId(args[0], currentChatId);
-    const group = this.getGroupConfig(targetChatId);
+    const group = await this.getGroupConfig(targetChatId);
 
     if (!group) {
       await this.sendMessage(currentChatId, `No config found for ${targetChatId}.`);
@@ -800,11 +794,11 @@ class NewsBot {
   }
 
   async handleAdminList(chatId) {
-    const groups = this.listGroupConfigs();
+    const groups = await this.listGroupConfigs();
     const lines = Object.entries(groups).map(([groupChatId, group]) => formatGroupConfig(groupChatId, group));
 
     await this.sendMessage(chatId, lines.length ? lines.join("\n\n") : "No chat configs saved yet.", {
-      replyMarkup: adminHomeKeyboard(chatId, this.listKnownGroups()),
+      replyMarkup: adminHomeKeyboard(chatId, await this.listKnownGroups()),
     });
   }
 
@@ -817,7 +811,7 @@ class NewsBot {
       return;
     }
 
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     groups[chatId] = {
       topic: normalizedTopic,
       intervalMinutes: groups[chatId]?.intervalMinutes || this.defaultIntervalMinutes,
@@ -827,7 +821,7 @@ class NewsBot {
       enabled: true,
       updatedAt: new Date().toISOString(),
     };
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
 
     this.scheduleGroup(chatId, groups[chatId]);
     await this.sendAdminUpdate(`News topic set for ${chatId}: ${normalizedTopic}.`);
@@ -843,7 +837,7 @@ class NewsBot {
       return;
     }
 
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     if (!groups[chatId]) {
       await this.sendMessage(chatId, "Set a topic first from the admin panel.", {
         replyMarkup: adminKeyboard(chatId),
@@ -854,14 +848,14 @@ class NewsBot {
     groups[chatId].intervalMinutes = minutes;
     groups[chatId].enabled = true;
     groups[chatId].updatedAt = new Date().toISOString();
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
 
     this.scheduleGroup(chatId, groups[chatId]);
     await this.sendAdminUpdate(`Posting interval set for ${chatId}: ${minutes} minutes.`);
   }
 
   async sendChatStatus(outputChatId, targetChatId = outputChatId) {
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const group = groups[targetChatId];
 
     if (!group || !group.enabled) {
@@ -881,7 +875,7 @@ class NewsBot {
     if (!normalizedChatId) throwHttpError(400, "chatId is required");
 
     const [chat, botUser] = await Promise.all([this.telegram("getChat", { chat_id: normalizedChatId }), this.getMe()]);
-    this.rememberChat(chat.result);
+    await this.rememberChat(chat.result);
     const membership = await this.telegram("getChatMember", {
       chat_id: normalizedChatId,
       user_id: botUser.id,
@@ -912,8 +906,7 @@ class NewsBot {
   }
 
   async runDuePosts(now = new Date()) {
-    ensureDataFiles();
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const summary = {
       ok: true,
       checkedAt: now.toISOString(),
@@ -943,7 +936,7 @@ class NewsBot {
         ...group,
         lastScheduledAttemptAt: now.toISOString(),
       };
-      writeJson(GROUPS_FILE, groups);
+      await writeJson(GROUPS_STORE, groups);
 
       try {
         const result = await this.postNewsNow(chatId, { scheduled: true, now });
@@ -952,7 +945,7 @@ class NewsBot {
         } else {
           summary.skipped += 1;
         }
-        const latestGroups = readJson(GROUPS_FILE);
+        const latestGroups = await readJson(GROUPS_STORE);
         summary.schedules[chatId] = getScheduleStatus(latestGroups[chatId], now);
       } catch (error) {
         summary.errors.push({ chatId, error: error.message });
@@ -976,19 +969,19 @@ class NewsBot {
   }
 
   async stopNews(chatId) {
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     if (groups[chatId]) {
       groups[chatId].enabled = false;
       groups[chatId].updatedAt = new Date().toISOString();
-      writeJson(GROUPS_FILE, groups);
+      await writeJson(GROUPS_STORE, groups);
     }
 
     this.clearGroupTimer(chatId);
     await this.sendAdminUpdate(`News posting stopped for ${chatId}.`);
   }
 
-  restoreScheduledPosts() {
-    const groups = readJson(GROUPS_FILE);
+  async restoreScheduledPosts() {
+    const groups = await readJson(GROUPS_STORE);
     for (const [chatId, group] of Object.entries(groups)) {
       if (group.enabled) this.scheduleGroup(chatId, group);
     }
@@ -1015,8 +1008,13 @@ class NewsBot {
           this.postNewsNow(chatId).catch((error) => {
             console.error(`Failed posting scheduled news to ${chatId}:`, error.message);
           });
-          const current = this.getGroupConfig(chatId);
-          if (current?.enabled) startInterval();
+          this.getGroupConfig(chatId)
+            .then((current) => {
+              if (current?.enabled) startInterval();
+            })
+            .catch((error) => {
+              console.error(`Failed checking schedule state for ${chatId}:`, error.message);
+            });
         }, delayMs);
 
         this.groupTimers.set(chatId, { timeout });
@@ -1036,7 +1034,7 @@ class NewsBot {
 
   async postNewsNow(chatId, options = {}) {
     const normalizedChatId = String(chatId);
-    const groups = readJson(GROUPS_FILE);
+    const groups = await readJson(GROUPS_STORE);
     const group = groups[normalizedChatId];
     if (!group?.enabled || !NEWS_TOPICS[group.topic]) {
       if (!options.silentNoConfig) {
@@ -1051,7 +1049,7 @@ class NewsBot {
       group.enabled = false;
       group.updatedAt = new Date().toISOString();
       groups[normalizedChatId] = group;
-      writeJson(GROUPS_FILE, groups);
+      await writeJson(GROUPS_STORE, groups);
       this.clearGroupTimer(normalizedChatId);
       await this.sendAdminUpdate(`Post limit reached. News stopped for ${normalizedChatId}.`);
       return;
@@ -1085,7 +1083,7 @@ class NewsBot {
     }
     group.updatedAt = new Date().toISOString();
     groups[normalizedChatId] = group;
-    writeJson(GROUPS_FILE, groups);
+    await writeJson(GROUPS_STORE, groups);
 
     await this.sendAdminUpdate(
       [
@@ -1545,7 +1543,7 @@ function limitKeyboard(targetChatId, topic, intervalMinutes) {
 }
 
 async function findFreshArticle(chatId, topic) {
-  const posted = readJson(POSTED_FILE);
+  const posted = await readJson(POSTED_STORE);
   posted[chatId] ||= [];
   const seen = new Set(posted[chatId]);
 
@@ -1570,7 +1568,7 @@ async function findFreshArticle(chatId, topic) {
   if (!article) return null;
 
   posted[chatId] = [article.link, ...article.fingerprints, ...posted[chatId]].slice(0, 200);
-  writeJson(POSTED_FILE, posted);
+  await writeJson(POSTED_STORE, posted);
   return article;
 }
 
@@ -1634,11 +1632,19 @@ async function fetchRss(feedUrl) {
   });
 }
 
-function ensureDataFiles() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(GROUPS_FILE)) writeJson(GROUPS_FILE, {});
-  if (!fs.existsSync(POSTED_FILE)) writeJson(POSTED_FILE, {});
-  if (!fs.existsSync(CHATS_FILE)) writeJson(CHATS_FILE, {});
+async function ensureDataStore() {
+  await Promise.all([ensureDataDocument(GROUPS_STORE), ensureDataDocument(POSTED_STORE), ensureDataDocument(CHATS_STORE)]);
+}
+
+async function ensureDataDocument(name) {
+  await db.execute(
+    [
+      "INSERT INTO tel_news_data (data_name, data_json)",
+      "VALUES (?, ?)",
+      "ON DUPLICATE KEY UPDATE data_name = VALUES(data_name)",
+    ].join(" "),
+    [name, "{}"]
+  );
 }
 
 function matchFirst(value, regex) {
@@ -1668,12 +1674,36 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+async function readJson(name) {
+  const rows = await db.query("SELECT data_json FROM tel_news_data WHERE data_name = ? LIMIT 1", [name]);
+  if (!rows.length) {
+    await ensureDataDocument(name);
+    return {};
+  }
+
+  return parseJsonDocument(rows[0].data_json);
 }
 
-function writeJson(filePath, value) {
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+async function writeJson(name, value) {
+  await db.execute(
+    [
+      "INSERT INTO tel_news_data (data_name, data_json)",
+      "VALUES (?, ?)",
+      "ON DUPLICATE KEY UPDATE data_json = VALUES(data_json), updated_at = CURRENT_TIMESTAMP",
+    ].join(" "),
+    [name, JSON.stringify(value)]
+  );
+}
+
+function parseJsonDocument(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
 }
 
 function sleep(ms) {

@@ -16,7 +16,7 @@ async function handleTestRoute(req, res, bot, requireHttpAdmin) {
       sendJson(res, 200, {
         ok: true,
         message: "pong",
-        bot: bot.getStatus(),
+        bot: await bot.getStatus(),
       });
       return;
     }

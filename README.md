@@ -60,7 +60,7 @@ Main menu
 List configs
 ```
 
-The bot stores chat settings in `backend/data/groups.json`.
+The bot stores chat settings, known chats, and posted-news fingerprints in the DBMS Gateway database. Run `backend/migrations/001_create_tel_news_data.sql` against the live database before deploying this version.
 Database gateway access is centralized in `backend/db.js`, which uses the local `backend/diamond-sql.js` connector. Do not store MySQL host, user, or password in this app; keep real MySQL credentials only in the DBMS Gateway project.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
