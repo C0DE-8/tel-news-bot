@@ -46,8 +46,8 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
     if (req.method === "POST" && pathname === "/admin/news-config") {
       const payload = await readJsonBody(req);
       requireHttpAdmin(req, payload);
-      const group = await controller.configureNews(payload);
-      sendJson(res, 200, { ok: true, group });
+      const result = await controller.configureNews(payload);
+      sendJson(res, 200, result?.groups ? { ok: true, groups: result.groups } : { ok: true, group: result });
       return;
     }
 

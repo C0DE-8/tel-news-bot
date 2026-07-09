@@ -8,6 +8,8 @@ const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
+let dataStoreReady = false;
+let dataStorePromise = null;
 
 const NEWS_TOPICS = {
   crypto: [
@@ -195,6 +197,20 @@ class NewsBot {
     );
 
     return addScheduleStatus(groups[chatId]);
+  }
+
+  async configureGroups(payload) {
+    const chatIds = normalizeChatIds(payload.chatIds || payload.chatId);
+    if (chatIds.length <= 1) {
+      return this.configureGroup({ ...payload, chatId: chatIds[0] });
+    }
+
+    const groups = {};
+    for (const chatId of chatIds) {
+      groups[chatId] = await this.configureGroup({ ...payload, chatId });
+    }
+
+    return { groups };
   }
 
   async disableGroup(chatId) {
@@ -1342,6 +1358,17 @@ function normalizeTargetChatId(value, currentChatId) {
   return String(value).trim();
 }
 
+function normalizeChatIds(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function isGroupChatType(type) {
   return ["group", "supergroup", "channel"].includes(type);
 }
@@ -1633,7 +1660,34 @@ async function fetchRss(feedUrl) {
 }
 
 async function ensureDataStore() {
+  if (dataStoreReady) return;
+  if (dataStorePromise) return dataStorePromise;
+
+  dataStorePromise = initializeDataStore().catch((error) => {
+    dataStorePromise = null;
+    throw error;
+  });
+  await dataStorePromise;
+  dataStoreReady = true;
+}
+
+async function initializeDataStore() {
+  await ensureDataTable();
   await Promise.all([ensureDataDocument(GROUPS_STORE), ensureDataDocument(POSTED_STORE), ensureDataDocument(CHATS_STORE)]);
+}
+
+async function ensureDataTable() {
+  await db.execute(
+    [
+      "CREATE TABLE IF NOT EXISTS tel_news_data (",
+      "data_name VARCHAR(32) NOT NULL,",
+      "data_json LONGTEXT NOT NULL,",
+      "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+      "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+      "PRIMARY KEY (data_name)",
+      ")",
+    ].join(" ")
+  );
 }
 
 async function ensureDataDocument(name) {
@@ -1675,6 +1729,7 @@ function escapeHtml(value) {
 }
 
 async function readJson(name) {
+  await ensureDataStore();
   const rows = await db.query("SELECT data_json FROM tel_news_data WHERE data_name = ? LIMIT 1", [name]);
   if (!rows.length) {
     await ensureDataDocument(name);
@@ -1685,6 +1740,7 @@ async function readJson(name) {
 }
 
 async function writeJson(name, value) {
+  await ensureDataStore();
   await db.execute(
     [
       "INSERT INTO tel_news_data (data_name, data_json)",
