@@ -17,6 +17,12 @@ TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=6112214313
 TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
 CRON_SECRET=
+
+# DBMS Gateway
+SITE_ID=your_project_site_id
+API_KEY=full_dbms_api_key_not_the_short_prefix
+DBMS_URL=https://api.dbms.copupbid.com/api
+DBMS_TIMEOUT_MS=15000
 ```
 
 3. Start the bot:
@@ -55,6 +61,7 @@ List configs
 ```
 
 The bot stores chat settings in `backend/data/groups.json`.
+Database gateway access is centralized in `backend/db.js`, which uses the local `backend/diamond-sql.js` connector. Do not store MySQL host, user, or password in this app; keep real MySQL credentials only in the DBMS Gateway project.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.

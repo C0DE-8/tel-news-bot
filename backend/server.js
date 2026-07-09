@@ -11,6 +11,7 @@ const { getPathname, sendJson } = require("./utils/http");
 
 loadEnv();
 
+const db = require("./db");
 const PORT = Number(process.env.PORT || 3000);
 const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({
@@ -30,7 +31,12 @@ const server = http.createServer(async (req, res) => {
   const pathname = getPathname(req);
 
   if (pathname === "/health") {
-    sendJson(res, 200, { ok: true });
+    try {
+      const status = await db.status();
+      sendJson(res, 200, { ok: true, gateway: status });
+    } catch (error) {
+      sendJson(res, 503, { ok: false, error: error.message });
+    }
     return;
   }
 
