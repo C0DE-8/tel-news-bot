@@ -2,13 +2,13 @@
 
 function connectProject(siteId, options = {}) {
   const apiKey = options.apiKey;
-  const dbmsUrl = normalizeDbmsUrl(options.dbmsUrl);
+  const dbmsUrls = normalizeDbmsUrls(options.dbmsUrl);
   const timeoutMs = Number(options.timeoutMs || 15000);
 
-  async function request(path, requestOptions = {}) {
+  async function requestAt(dbmsUrl, path, requestOptions = {}) {
     if (!siteId) throw new Error("SITE_ID is required");
     if (!apiKey) throw new Error("API_KEY is required");
-    if (!dbmsUrl) throw new Error("DBMS_URL is required");
+    if (!dbmsUrls.length) throw new Error("DBMS_URL is required");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -43,7 +43,7 @@ function connectProject(siteId, options = {}) {
   }
 
   async function query(sql, params = []) {
-    const payload = await request("/gateway/query", {
+    const payload = await requestAny(["/gateway/query", "/query", "/api/gateway/query"], {
       method: "POST",
       body: JSON.stringify({ sql, params }),
     });
@@ -51,15 +51,40 @@ function connectProject(siteId, options = {}) {
     return payload.rows || [];
   }
 
+  async function requestAny(paths, requestOptions = {}) {
+    const errors = [];
+
+    for (const dbmsUrl of dbmsUrls) {
+      for (const path of paths) {
+        try {
+          return await requestAt(dbmsUrl, path, requestOptions);
+        } catch (error) {
+          errors.push(`${dbmsUrl}${path}: ${compactError(error.message)}`);
+        }
+      }
+    }
+
+    throw new Error(`DBMS Gateway request failed. Tried ${errors.join(" | ")}`);
+  }
+
   return {
     query,
     execute: query,
-    status: () => request("/gateway/status", { method: "GET" }),
+    status: () => requestAny(["/gateway/status", "/status", "/api/gateway/status"], { method: "GET" }),
   };
 }
 
-function normalizeDbmsUrl(value) {
-  return String(value || "").replace(/\/+$/, "");
+function normalizeDbmsUrls(value) {
+  const raw = String(value || "").replace(/\/+$/, "");
+  if (!raw) return [];
+
+  const urls = [raw];
+  if (raw.endsWith("/api")) urls.push(raw.slice(0, -4));
+  return [...new Set(urls)];
+}
+
+function compactError(message) {
+  return String(message || "").replace(/\s+/g, " ").slice(0, 180);
 }
 
 async function readPayload(response) {

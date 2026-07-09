@@ -13,7 +13,7 @@ Content-Type: application/json
 ```
 
 Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
-Scheduled posting on Vercel uses `/cron/post-news`. If you set `CRON_SECRET` on the server, pass the same value as `?secret=...` or `x-cron-secret`; if you leave `CRON_SECRET` empty, no cron header is needed.
+Scheduled posting uses in-app timers from saved SQL config. There is no cron route.
 
 On Vercel, also set this environment variable so the bot always knows which channel to post into:
 
@@ -66,7 +66,7 @@ Expected:
 ```json
 {
   "ok": true,
-  "version": "sql-normalized-v2",
+  "version": "sql-normalized-v3-db-gateway-fallback",
   "storage": {
     "type": "sql",
     "legacyFileStore": false
@@ -74,7 +74,7 @@ Expected:
 }
 ```
 
-If this route is missing, or the version is not `sql-normalized-v2`, Vercel is still serving an old deployment.
+If this route is missing, or the version is not `sql-normalized-v3-db-gateway-fallback`, Vercel is still serving an old deployment.
 
 ## 3. SQL Storage Write Check
 
@@ -94,7 +94,7 @@ Expected:
 {
   "ok": true,
   "storage": {
-    "version": "sql-normalized-v2",
+    "version": "sql-normalized-v3-db-gateway-fallback",
     "type": "sql"
   },
   "wrote": {
@@ -502,51 +502,23 @@ Body:
 }
 ```
 
-## 17. Run Scheduled Post Check
+## 17. Check Timer Status
 
-Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
-
-Important: Vercel/serverless does not keep `setInterval` running after a request ends. This route is what makes scheduled posting work on the live URL.
-Use the `schedules` object in the response to see `nextPostAt`, `nextPostInSeconds`, and `countdown`.
+Purpose: Verify the saved SQL config and countdown for the in-app timer.
 
 ```text
 Method: GET
-URL: https://tel-news-bot-ivory.vercel.app/cron/post-news
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config/-1002195390106
 Headers: none
 Body: none
 ```
 
-Expected shape:
-
-```json
-{
-  "ok": true,
-  "checkedAt": "2026-07-04T00:00:00.000Z",
-  "checked": 1,
-  "posted": 0,
-  "skipped": 1,
-  "schedules": {
-    "-1002195390106": {
-      "enabled": true,
-      "due": false,
-      "reason": "interval_not_due",
-      "intervalMinutes": 15,
-      "nextPostAt": "2026-07-08T12:15:00.000Z",
-      "nextPostInSeconds": 600,
-      "countdown": "10m 0s",
-      "postsSent": 0,
-      "postLimit": 10,
-      "postsRemaining": 10
-    }
-  },
-  "errors": []
-}
-```
-
-If you set `CRON_SECRET`, use:
+Look for:
 
 ```text
-URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
+group.schedule.nextPostAt
+group.schedule.nextPostInSeconds
+group.schedule.countdown
 ```
 
 ## 18. Get All News Configs
@@ -629,7 +601,7 @@ Body: none
 7. `POST /admin/group-check`
 8. `POST /admin/group-test-message`
 9. `POST /admin/news-config`
-10. `GET /cron/post-news`
+10. `GET /admin/news-config/-1002195390106`
 
 ## Replacements
 

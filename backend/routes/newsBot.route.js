@@ -8,7 +8,7 @@ const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
-const STORAGE_VERSION = "sql-normalized-v2";
+const STORAGE_VERSION = "sql-normalized-v3-db-gateway-fallback";
 let dataStoreReady = false;
 let dataStorePromise = null;
 

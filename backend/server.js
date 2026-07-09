@@ -12,7 +12,7 @@ const { getPathname, sendJson } = require("./utils/http");
 loadEnv();
 
 const db = require("./db");
-const APP_VERSION = "sql-normalized-v2";
+const APP_VERSION = "sql-normalized-v3-db-gateway-fallback";
 const PORT = Number(process.env.PORT || 3000);
 const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({
@@ -48,9 +48,10 @@ const server = http.createServer(async (req, res) => {
       version: APP_VERSION,
       storage: {
         type: "sql",
-        tables: ["tel_news_groups", "tel_news_chats", "tel_news_posted"],
+        tables: ["tel_news_groups", "tel_news_chats", "tel_news_posted", "tel_news_storage_checks"],
         legacyFileStore: false,
         legacyTmpPath: false,
+        dbGatewayFallback: true,
       },
       runtime: {
         vercel: Boolean(process.env.VERCEL),
