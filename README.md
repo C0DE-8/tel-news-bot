@@ -50,6 +50,7 @@ Send news now
 Admin panel
 Admin ID
 Set news
+Select multiple
 Check group
 Send test
 Send news now
@@ -60,12 +61,13 @@ Main menu
 List configs
 ```
 
-The bot stores chat settings, known chats, and posted-news fingerprints in the DBMS Gateway database. The app creates the `tel_news_data` table and default rows automatically; `backend/migrations/001_create_tel_news_data.sql` is kept for manual setup/debugging.
+The bot stores chat settings, known chats, and posted-news fingerprints in the DBMS Gateway database. The app creates the `tel_news_data` table and default rows automatically; `backend/migrations/001_create_tel_news_data.sql` is kept for manual setup/debugging. DB writes are verified after saving, so failed persistence returns a button/API error instead of showing a false success.
 Database gateway access is centralized in `backend/db.js`, which uses the local `backend/diamond-sql.js` connector. Do not store MySQL host, user, or password in this app; keep real MySQL credentials only in the DBMS Gateway project.
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
 The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
+Use `Select multiple` in the admin panel to apply one topic, interval, and limit to more than one group/channel from Telegram buttons.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
 On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.

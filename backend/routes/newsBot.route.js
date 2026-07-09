@@ -72,6 +72,7 @@ class NewsBot {
     this.started = false;
     this.groupTimers = new Map();
     this.botUser = null;
+    this.adminSelections = new Map();
   }
 
   start() {
@@ -475,6 +476,41 @@ class NewsBot {
         return;
       }
 
+      if (action === "multi") {
+        await this.sendMultiPicker(chatId, callbackQuery.from?.id);
+        await this.answerCallbackQuery(callbackQuery.id, "Select chats.");
+        return;
+      }
+
+      if (action === "toggle") {
+        this.toggleAdminSelection(callbackQuery.from?.id, targetChatId);
+        await this.sendMultiPicker(chatId, callbackQuery.from?.id);
+        await this.answerCallbackQuery(callbackQuery.id, "Selection updated.");
+        return;
+      }
+
+      if (action === "clear") {
+        this.clearAdminSelection(callbackQuery.from?.id);
+        await this.sendMultiPicker(chatId, callbackQuery.from?.id);
+        await this.answerCallbackQuery(callbackQuery.id, "Selection cleared.");
+        return;
+      }
+
+      if (action === "selected") {
+        const selectedIds = this.getAdminSelection(callbackQuery.from?.id);
+        if (!selectedIds.length) {
+          await this.sendMultiPicker(chatId, callbackQuery.from?.id);
+          await this.answerCallbackQuery(callbackQuery.id, "Pick at least one chat.");
+          return;
+        }
+
+        await this.sendMessage(chatId, `Selected ${selectedIds.length} chats.\nPick the news topic.`, {
+          replyMarkup: topicKeyboard("selected"),
+        });
+        await this.answerCallbackQuery(callbackQuery.id, "Choose topic.");
+        return;
+      }
+
       if (action === "group") {
         const group = (await this.listKnownGroups()).find((knownGroup) => knownGroup.id === targetChatId);
         await this.sendMessage(chatId, `Managing ${formatChatLabel(group || { id: targetChatId })}`, {
@@ -517,6 +553,27 @@ class NewsBot {
       }
 
       if (action === "set") {
+        if (target === "selected") {
+          const selectedIds = this.getAdminSelection(callbackQuery.from?.id);
+          if (!selectedIds.length) {
+            await this.sendMultiPicker(chatId, callbackQuery.from?.id);
+            await this.answerCallbackQuery(callbackQuery.id, "Pick at least one chat.");
+            return;
+          }
+
+          const result = await this.configureGroups({
+            chatIds: selectedIds,
+            topic,
+            intervalMinutes,
+            postLimit,
+          });
+          await this.sendMessage(chatId, formatMultiConfigResult(result.groups), {
+            replyMarkup: adminHomeKeyboard(chatId, await this.listKnownGroups()),
+          });
+          await this.answerCallbackQuery(callbackQuery.id, "Saved.");
+          return;
+        }
+
         const group = await this.configureGroup({
           chatId: targetChatId,
           topic,
@@ -736,6 +793,40 @@ class NewsBot {
     await this.sendMessage(chatId, knownGroups.length ? "Pick a chat." : "No known chats yet.", {
       replyMarkup: groupPickerKeyboard(chatId, knownGroups),
     });
+  }
+
+  async sendMultiPicker(chatId, adminUserId) {
+    const knownGroups = await this.listKnownGroups();
+    const selectedIds = this.getAdminSelection(adminUserId);
+    await this.sendMessage(
+      chatId,
+      knownGroups.length
+        ? `Select chats to configure.\nSelected: ${selectedIds.length}`
+        : "No known chats yet. Add the bot to channels/groups or set TELEGRAM_GROUP_CHAT_IDS.",
+      {
+        replyMarkup: multiPickerKeyboard(knownGroups, selectedIds),
+      }
+    );
+  }
+
+  getAdminSelection(adminUserId) {
+    const key = String(adminUserId || "");
+    return [...(this.adminSelections.get(key) || new Set())];
+  }
+
+  toggleAdminSelection(adminUserId, chatId) {
+    const key = String(adminUserId || "");
+    const selected = this.adminSelections.get(key) || new Set();
+    if (selected.has(chatId)) {
+      selected.delete(chatId);
+    } else {
+      selected.add(chatId);
+    }
+    this.adminSelections.set(key, selected);
+  }
+
+  clearAdminSelection(adminUserId) {
+    this.adminSelections.delete(String(adminUserId || ""));
   }
 
   async handleAdminSet(currentChatId, args) {
@@ -1399,6 +1490,14 @@ function formatGroupConfig(chatId, group) {
   ].join("\n");
 }
 
+function formatMultiConfigResult(groups) {
+  const entries = Object.entries(groups || {});
+  return [
+    `Saved news config for ${entries.length} chats.`,
+    ...entries.map(([chatId, group]) => `${chatId}: ${group.topic}, every ${group.intervalMinutes} minutes, limit ${group.postLimit || "none"}`),
+  ].join("\n");
+}
+
 function formatCronStatus(chatId, group) {
   const status = group.schedule || getScheduleStatus(group);
 
@@ -1464,6 +1563,7 @@ function adminHomeKeyboard(currentChatId, knownGroups) {
 
   if (knownGroups.length) {
     rows.push([{ text: "Pick chat", callback_data: "admin:groups:this" }]);
+    rows.push([{ text: "Select multiple", callback_data: "admin:multi:this" }]);
     for (const group of knownGroups.slice(0, 8)) {
       rows.push([{ text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` }]);
     }
@@ -1490,6 +1590,25 @@ function groupPickerKeyboard(currentChatId, knownGroups) {
   }
 
   rows.push([{ text: "Back", callback_data: "admin:panel:this" }]);
+  return { inline_keyboard: rows };
+}
+
+function multiPickerKeyboard(knownGroups, selectedIds) {
+  const selected = new Set(selectedIds);
+  const rows = knownGroups.slice(0, 20).map((group) => [
+    {
+      text: `${selected.has(group.id) ? "[x]" : "[ ]"} ${formatChatLabel(group)}`.slice(0, 60),
+      callback_data: `admin:toggle:${group.id}`,
+    },
+  ]);
+
+  rows.push([
+    { text: "Set news for selected", callback_data: "admin:selected:this" },
+  ]);
+  rows.push([
+    { text: "Clear", callback_data: "admin:clear:this" },
+    { text: "Back", callback_data: "admin:panel:this" },
+  ]);
   return { inline_keyboard: rows };
 }
 
@@ -1741,14 +1860,15 @@ async function readJson(name) {
 
 async function writeJson(name, value) {
   await ensureDataStore();
-  await db.execute(
-    [
-      "INSERT INTO tel_news_data (data_name, data_json)",
-      "VALUES (?, ?)",
-      "ON DUPLICATE KEY UPDATE data_json = VALUES(data_json), updated_at = CURRENT_TIMESTAMP",
-    ].join(" "),
-    [name, JSON.stringify(value)]
-  );
+  const json = JSON.stringify(value);
+  await ensureDataDocument(name);
+  await db.execute("UPDATE tel_news_data SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE data_name = ?", [json, name]);
+
+  const rows = await db.query("SELECT data_json FROM tel_news_data WHERE data_name = ? LIMIT 1", [name]);
+  const saved = rows[0] ? parseJsonDocument(rows[0].data_json) : null;
+  if (JSON.stringify(saved) !== json) {
+    throw new Error(`Database write verification failed for ${name}`);
+  }
 }
 
 function parseJsonDocument(value) {

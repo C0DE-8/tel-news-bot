@@ -325,7 +325,66 @@ crypto
 politics
 ```
 
-## 12. Configure Politics News
+## 12. Configure Multiple Chats
+
+Purpose: Configure the same news settings for more than one group/channel.
+
+Use `chatIds` as an array:
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-config
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "chatIds": [
+    "-1002195390106",
+    "-1000000000002"
+  ],
+  "topic": "crypto",
+  "intervalMinutes": 15,
+  "postLimit": 10,
+  "postNow": false
+}
+```
+
+Or use comma-separated ids:
+
+```json
+{
+  "chatIds": "-1002195390106,-1000000000002",
+  "topic": "crypto",
+  "intervalMinutes": 15,
+  "postLimit": 10,
+  "postNow": false
+}
+```
+
+Expected result:
+
+```json
+{
+  "ok": true,
+  "groups": {
+    "-1002195390106": {
+      "topic": "crypto",
+      "intervalMinutes": 15,
+      "postLimit": 10
+    },
+    "-1000000000002": {
+      "topic": "crypto",
+      "intervalMinutes": 15,
+      "postLimit": 10
+    }
+  }
+}
+```
+
+## 13. Configure Politics News
 
 Purpose: Same as above, but politics.
 
@@ -347,7 +406,7 @@ Body:
 }
 ```
 
-## 13. Configure And Post Immediately
+## 14. Configure And Post Immediately
 
 Purpose: Save config and immediately send one news item.
 
@@ -371,7 +430,7 @@ Body:
 }
 ```
 
-## 14. Run Scheduled Post Check
+## 15. Run Scheduled Post Check
 
 Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
 
@@ -418,7 +477,7 @@ If you set `CRON_SECRET`, use:
 URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
 ```
 
-## 15. Get All News Configs
+## 16. Get All News Configs
 
 Purpose: See all saved group/channel news configs.
 
@@ -429,7 +488,7 @@ Headers: none
 Body: none
 ```
 
-## 16. Get One Channel Config
+## 17. Get One Channel Config
 
 Purpose: See config for one channel, including `schedule.countdown` and `schedule.nextPostAt`.
 
@@ -440,7 +499,7 @@ Headers: none
 Body: none
 ```
 
-## 17. Start News For Channel
+## 18. Start News For Channel
 
 Purpose: Re-enable scheduled posting for the channel after it was stopped.
 
@@ -458,7 +517,7 @@ Body:
 }
 ```
 
-## 18. Stop News For Channel
+## 19. Stop News For Channel
 
 Purpose: Disable scheduled posting for the channel.
 
@@ -476,7 +535,7 @@ Body:
 }
 ```
 
-## 19. Delete Telegram Webhook
+## 20. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 
