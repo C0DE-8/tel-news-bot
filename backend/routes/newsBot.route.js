@@ -168,7 +168,7 @@ class NewsBot {
     const groups = await readJson(GROUPS_STORE);
     const current = groups[chatId] || {};
 
-    groups[chatId] = {
+    const nextGroup = {
       topic,
       intervalMinutes,
       postLimit,
@@ -180,10 +180,12 @@ class NewsBot {
       lastScheduledAttemptAt: current.lastScheduledAttemptAt || null,
       updatedAt: new Date().toISOString(),
     };
+    groups[chatId] = nextGroup;
     await writeJson(GROUPS_STORE, groups);
+    const savedGroup = await this.requireSavedGroup(chatId, nextGroup);
 
     if (enabled) {
-      this.scheduleGroup(chatId, groups[chatId]);
+      this.scheduleGroup(chatId, savedGroup);
     } else {
       this.clearGroupTimer(chatId);
     }
@@ -194,17 +196,37 @@ class NewsBot {
 
     await this.sendAdminUpdate(
       [
-        "News config saved.",
-        `Group: ${chatId}`,
-        `Topic: ${topic}`,
-        `Every: ${intervalMinutes} minutes`,
-        `Limit: ${postLimit || "none"}`,
+        "✅ Database saved first.",
+        `💬 Chat: ${chatId}`,
+        `📰 Topic: ${savedGroup.topic}`,
+        `⏱ Every: ${savedGroup.intervalMinutes} minutes`,
+        `🔢 Limit: ${savedGroup.postLimit || "none"}`,
         process.env.VERCEL ? "Scheduler: Vercel cron route /cron/post-news" : "Scheduler: local timer",
       ].join("\n"),
       { replyMarkup: adminKeyboard(chatId) }
     );
 
-    return addScheduleStatus(groups[chatId]);
+    return addScheduleStatus(savedGroup);
+  }
+
+  async requireSavedGroup(chatId, expectedGroup) {
+    const savedGroup = (await readJson(GROUPS_STORE))[chatId];
+    if (!savedGroup) throw new Error(`Database save failed for ${chatId}: row was not found after write`);
+
+    const checks = [
+      ["topic", savedGroup.topic, expectedGroup.topic],
+      ["intervalMinutes", Number(savedGroup.intervalMinutes), Number(expectedGroup.intervalMinutes)],
+      ["postLimit", savedGroup.postLimit ?? null, expectedGroup.postLimit ?? null],
+      ["enabled", Boolean(savedGroup.enabled), Boolean(expectedGroup.enabled)],
+    ];
+
+    for (const [field, saved, expected] of checks) {
+      if (saved !== expected) {
+        throw new Error(`Database save failed for ${chatId}: ${field} saved as ${saved}, expected ${expected}`);
+      }
+    }
+
+    return savedGroup;
   }
 
   async configureGroups(payload) {
@@ -587,7 +609,7 @@ class NewsBot {
           intervalMinutes,
           postLimit,
         });
-        await this.sendMessage(chatId, `✅ Saved from button\n\n${formatGroupConfig(targetChatId, group)}`, {
+        await this.sendMessage(chatId, `✅ Saved to SQL database\n\n${formatGroupConfig(targetChatId, group)}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Saved.");
@@ -1226,11 +1248,11 @@ class NewsBot {
 
     await this.sendAdminUpdate(
       [
-        `${options.scheduled ? "Scheduled" : options.manual ? "Manual" : "News"} post sent.`,
-        `Group: ${normalizedChatId}`,
-        `Topic: ${group.topic}`,
-        `Title: ${article.title}`,
-        group.enabled ? `Posts sent: ${group.postsSent}` : "Post limit reached. News stopped.",
+        `${options.scheduled ? "⏰ Scheduled" : options.manual ? "🚀 Manual" : "📰 News"} post sent from saved DB config.`,
+        `💬 Chat: ${normalizedChatId}`,
+        `📰 Topic: ${group.topic}`,
+        `🔗 Title: ${article.title}`,
+        group.enabled ? `📨 Posts sent: ${group.postsSent}` : "⏸ Post limit reached. News stopped.",
       ].join("\n"),
       { replyMarkup: adminKeyboard(normalizedChatId) }
     );

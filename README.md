@@ -67,6 +67,7 @@ If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settin
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
 The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
 Use `Select multiple` in the admin panel to apply one topic, interval, and limit to more than one group/channel from Telegram buttons.
+When an admin saves news settings, the bot writes to SQL first, reads the saved row back, verifies the values, then schedules or posts from that saved database config.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
 On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.
