@@ -23,6 +23,16 @@ TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
 
 Use the real Telegram channel id. Channel ids are usually negative numbers.
 
+Database note: the bot now saves to real SQL tables, not the old `tel_news_data.data_json` rows. In phpMyAdmin, check:
+
+```text
+tel_news_groups
+tel_news_chats
+tel_news_posted
+```
+
+Run `backend/migrations/002_create_normalized_news_tables.sql` manually only if you want to create the tables before the app auto-creates them.
+
 ## 1. Health Check
 
 Purpose: Check that the deployed API is online.

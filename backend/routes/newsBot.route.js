@@ -1791,32 +1791,54 @@ async function ensureDataStore() {
 }
 
 async function initializeDataStore() {
-  await ensureDataTable();
-  await Promise.all([ensureDataDocument(GROUPS_STORE), ensureDataDocument(POSTED_STORE), ensureDataDocument(CHATS_STORE)]);
+  await ensureDataTables();
 }
 
-async function ensureDataTable() {
+async function ensureDataTables() {
   await db.execute(
     [
-      "CREATE TABLE IF NOT EXISTS tel_news_data (",
-      "data_name VARCHAR(32) NOT NULL,",
-      "data_json LONGTEXT NOT NULL,",
+      "CREATE TABLE IF NOT EXISTS tel_news_groups (",
+      "chat_id VARCHAR(64) NOT NULL,",
+      "topic VARCHAR(32) NULL,",
+      "interval_minutes INT NULL,",
+      "post_limit INT NULL,",
+      "post_at VARCHAR(40) NULL,",
+      "posts_sent INT NOT NULL DEFAULT 0,",
+      "enabled TINYINT(1) NOT NULL DEFAULT 0,",
+      "last_manual_post_at VARCHAR(40) NULL,",
+      "last_scheduled_post_at VARCHAR(40) NULL,",
+      "last_scheduled_attempt_at VARCHAR(40) NULL,",
+      "updated_at VARCHAR(40) NULL,",
       "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,",
-      "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
-      "PRIMARY KEY (data_name)",
+      "PRIMARY KEY (chat_id)",
       ")",
     ].join(" ")
   );
-}
 
-async function ensureDataDocument(name) {
   await db.execute(
     [
-      "INSERT INTO tel_news_data (data_name, data_json)",
-      "VALUES (?, ?)",
-      "ON DUPLICATE KEY UPDATE data_name = VALUES(data_name)",
-    ].join(" "),
-    [name, "{}"]
+      "CREATE TABLE IF NOT EXISTS tel_news_chats (",
+      "chat_id VARCHAR(64) NOT NULL,",
+      "title VARCHAR(255) NULL,",
+      "chat_type VARCHAR(32) NULL,",
+      "username VARCHAR(255) NULL,",
+      "source VARCHAR(32) NULL,",
+      "updated_at VARCHAR(40) NULL,",
+      "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+      "PRIMARY KEY (chat_id)",
+      ")",
+    ].join(" ")
+  );
+
+  await db.execute(
+    [
+      "CREATE TABLE IF NOT EXISTS tel_news_posted (",
+      "chat_id VARCHAR(64) NOT NULL,",
+      "fingerprint VARCHAR(512) NOT NULL,",
+      "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+      "PRIMARY KEY (chat_id, fingerprint)",
+      ")",
+    ].join(" ")
   );
 }
 
@@ -1849,37 +1871,138 @@ function escapeHtml(value) {
 
 async function readJson(name) {
   await ensureDataStore();
-  const rows = await db.query("SELECT data_json FROM tel_news_data WHERE data_name = ? LIMIT 1", [name]);
-  if (!rows.length) {
-    await ensureDataDocument(name);
-    return {};
-  }
-
-  return parseJsonDocument(rows[0].data_json);
+  if (name === GROUPS_STORE) return readGroups();
+  if (name === CHATS_STORE) return readChats();
+  if (name === POSTED_STORE) return readPosted();
+  return {};
 }
 
 async function writeJson(name, value) {
   await ensureDataStore();
-  const json = JSON.stringify(value);
-  await ensureDataDocument(name);
-  await db.execute("UPDATE tel_news_data SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE data_name = ?", [json, name]);
+  if (name === GROUPS_STORE) return writeGroups(value);
+  if (name === CHATS_STORE) return writeChats(value);
+  if (name === POSTED_STORE) return writePosted(value);
+}
 
-  const rows = await db.query("SELECT data_json FROM tel_news_data WHERE data_name = ? LIMIT 1", [name]);
-  const saved = rows[0] ? parseJsonDocument(rows[0].data_json) : null;
-  if (JSON.stringify(saved) !== json) {
-    throw new Error(`Database write verification failed for ${name}`);
+async function readGroups() {
+  const rows = await db.query("SELECT * FROM tel_news_groups", []);
+  const groups = {};
+
+  for (const row of rows) {
+    groups[String(row.chat_id)] = {
+      topic: row.topic || null,
+      intervalMinutes: numberOrNull(row.interval_minutes),
+      postLimit: numberOrNull(row.post_limit),
+      postAt: row.post_at || null,
+      postsSent: Number(row.posts_sent || 0),
+      enabled: row.enabled === true || row.enabled === 1 || row.enabled === "1",
+      lastManualPostAt: row.last_manual_post_at || null,
+      lastScheduledPostAt: row.last_scheduled_post_at || null,
+      lastScheduledAttemptAt: row.last_scheduled_attempt_at || null,
+      updatedAt: row.updated_at || null,
+    };
+  }
+
+  return groups;
+}
+
+async function writeGroups(groups) {
+  for (const [chatId, group] of Object.entries(groups || {})) {
+    await db.execute("INSERT IGNORE INTO tel_news_groups (chat_id) VALUES (?)", [chatId]);
+    await db.execute(
+      [
+        "UPDATE tel_news_groups SET",
+        "topic = ?, interval_minutes = ?, post_limit = ?, post_at = ?, posts_sent = ?, enabled = ?,",
+        "last_manual_post_at = ?, last_scheduled_post_at = ?, last_scheduled_attempt_at = ?, updated_at = ?",
+        "WHERE chat_id = ?",
+      ].join(" "),
+      [
+        group.topic || null,
+        numberOrNull(group.intervalMinutes),
+        numberOrNull(group.postLimit),
+        group.postAt || null,
+        Number(group.postsSent || 0),
+        group.enabled ? 1 : 0,
+        group.lastManualPostAt || null,
+        group.lastScheduledPostAt || null,
+        group.lastScheduledAttemptAt || null,
+        group.updatedAt || new Date().toISOString(),
+        chatId,
+      ]
+    );
+  }
+
+  const saved = await readGroups();
+  for (const chatId of Object.keys(groups || {})) {
+    if (!saved[chatId]) throw new Error(`Database write verification failed for ${GROUPS_STORE}:${chatId}`);
   }
 }
 
-function parseJsonDocument(value) {
-  if (!value) return {};
-  if (typeof value === "object") return value;
+async function readChats() {
+  const rows = await db.query("SELECT * FROM tel_news_chats", []);
+  const chats = {};
 
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
+  for (const row of rows) {
+    chats[String(row.chat_id)] = {
+      id: String(row.chat_id),
+      title: row.title || String(row.chat_id),
+      type: row.chat_type || "group",
+      username: row.username || null,
+      updatedAt: row.updated_at || null,
+      source: row.source || "telegram",
+    };
   }
+
+  return chats;
+}
+
+async function writeChats(chats) {
+  for (const [chatId, chat] of Object.entries(chats || {})) {
+    await db.execute("INSERT IGNORE INTO tel_news_chats (chat_id) VALUES (?)", [chatId]);
+    await db.execute(
+      [
+        "UPDATE tel_news_chats SET",
+        "title = ?, chat_type = ?, username = ?, source = ?, updated_at = ?",
+        "WHERE chat_id = ?",
+      ].join(" "),
+      [
+        chat.title || chat.username || chatId,
+        chat.type || "group",
+        chat.username || null,
+        chat.source || "telegram",
+        chat.updatedAt || new Date().toISOString(),
+        chatId,
+      ]
+    );
+  }
+}
+
+async function readPosted() {
+  const rows = await db.query("SELECT chat_id, fingerprint FROM tel_news_posted ORDER BY created_at DESC", []);
+  const posted = {};
+
+  for (const row of rows) {
+    const chatId = String(row.chat_id);
+    posted[chatId] ||= [];
+    posted[chatId].push(row.fingerprint);
+  }
+
+  return posted;
+}
+
+async function writePosted(posted) {
+  for (const [chatId, fingerprints] of Object.entries(posted || {})) {
+    await db.execute("DELETE FROM tel_news_posted WHERE chat_id = ?", [chatId]);
+    for (const fingerprint of (fingerprints || []).slice(0, 200)) {
+      await db.execute("INSERT IGNORE INTO tel_news_posted (chat_id, fingerprint) VALUES (?, ?)", [chatId, fingerprint]);
+    }
+  }
+}
+
+function numberOrNull(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function sleep(ms) {
