@@ -92,11 +92,7 @@ class NewsBot {
 
   async initializeStorageAndRuntime() {
     await ensureDataStore();
-    if (process.env.VERCEL) {
-      console.log("Vercel runtime detected. Scheduled posts use /cron/post-news.");
-    } else {
-      await this.restoreScheduledPosts();
-    }
+    await this.restoreScheduledPosts();
 
     if (this.useWebhook) {
       console.log("Telegram webhook mode enabled.");
@@ -118,7 +114,7 @@ class NewsBot {
       activeGroups,
       topics: Object.keys(NEWS_TOPICS),
       adminRestricted: this.adminChatIds.size > 0,
-      scheduler: process.env.VERCEL ? "cron-route" : "local-timer",
+      scheduler: "timer",
       storage: {
         version: STORAGE_VERSION,
         type: "sql",
@@ -201,7 +197,7 @@ class NewsBot {
         `📰 Topic: ${savedGroup.topic}`,
         `⏱ Every: ${savedGroup.intervalMinutes} minutes`,
         `🔢 Limit: ${savedGroup.postLimit || "none"}`,
-        process.env.VERCEL ? "Scheduler: Vercel cron route /cron/post-news" : "Scheduler: local timer",
+        "Scheduler: saved timer",
       ].join("\n"),
       { replyMarkup: adminKeyboard(chatId) }
     );
@@ -625,12 +621,12 @@ class NewsBot {
         return;
       }
 
-      if (action === "cron") {
+      if (action === "timer") {
         const group = await this.getGroupConfig(targetChatId);
-        await this.sendMessage(chatId, group ? formatCronStatus(targetChatId, group) : `No config found for ${targetChatId}.`, {
+        await this.sendMessage(chatId, group ? formatTimerStatus(targetChatId, group) : `No config found for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
-        await this.answerCallbackQuery(callbackQuery.id, "Cron status sent.");
+        await this.answerCallbackQuery(callbackQuery.id, "Timer status sent.");
         return;
       }
 
@@ -1066,69 +1062,6 @@ class NewsBot {
     };
   }
 
-  async runDuePosts(now = new Date()) {
-    const groups = await readJson(GROUPS_STORE);
-    const summary = {
-      ok: true,
-      checkedAt: now.toISOString(),
-      checked: 0,
-      posted: 0,
-      skipped: 0,
-      schedules: {},
-      errors: [],
-    };
-
-    for (const [chatId, group] of Object.entries(groups)) {
-      summary.checked += 1;
-      summary.schedules[chatId] = getScheduleStatus(group, now);
-
-      if (!group.enabled || !NEWS_TOPICS[group.topic]) {
-        summary.skipped += 1;
-        continue;
-      }
-
-      const due = getScheduleDueState(group, now);
-      if (!due.ready) {
-        summary.skipped += 1;
-        continue;
-      }
-
-      groups[chatId] = {
-        ...group,
-        lastScheduledAttemptAt: now.toISOString(),
-      };
-      await writeJson(GROUPS_STORE, groups);
-
-      try {
-        const result = await this.postNewsNow(chatId, { scheduled: true, now });
-        if (result?.posted) {
-          summary.posted += 1;
-        } else {
-          summary.skipped += 1;
-        }
-        const latestGroups = await readJson(GROUPS_STORE);
-        summary.schedules[chatId] = getScheduleStatus(latestGroups[chatId], now);
-      } catch (error) {
-        summary.errors.push({ chatId, error: error.message });
-        await this.sendAdminUpdate(`Scheduled post failed for ${chatId}: ${error.message}`);
-      }
-    }
-
-    if (summary.posted || summary.errors.length) {
-      await this.sendAdminUpdate(
-        [
-          "Cron post check finished.",
-          `Checked: ${summary.checked}`,
-          `Posted: ${summary.posted}`,
-          `Skipped: ${summary.skipped}`,
-          `Errors: ${summary.errors.length}`,
-        ].join("\n")
-      );
-    }
-
-    return summary;
-  }
-
   async stopNews(chatId) {
     const groups = await readJson(GROUPS_STORE);
     if (groups[chatId]) {
@@ -1552,11 +1485,11 @@ function formatMultiConfigResult(groups) {
   ].join("\n");
 }
 
-function formatCronStatus(chatId, group) {
+function formatTimerStatus(chatId, group) {
   const status = group.schedule || getScheduleStatus(group);
 
   return [
-    `⏳ Cron status for ${chatId}`,
+    `⏳ Timer status for ${chatId}`,
     `🔌 Enabled: ${status.enabled ? "yes" : "no"}`,
     `🚦 Due: ${status.due ? "yes" : "no"}`,
     `ℹ️ Reason: ${status.reason}`,
@@ -1567,7 +1500,7 @@ function formatCronStatus(chatId, group) {
     status.postLimit ? `🔢 Post limit: ${status.postLimit}` : "🔢 Post limit: none",
     status.postLimit ? `📌 Posts remaining: ${status.postsRemaining}` : null,
     `🕘 Last post: ${status.lastScheduledPostAt || "none"}`,
-    `🔁 Last cron check: ${status.lastScheduledAttemptAt || "none"}`,
+    `🔁 Last timer attempt: ${status.lastScheduledAttemptAt || "none"}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1674,7 +1607,7 @@ function adminKeyboard(targetChatId = "this") {
       ],
       [
         { text: "📊 Status", callback_data: `admin:status:${targetChatId}` },
-        { text: "⏳ Cron", callback_data: `admin:cron:${targetChatId}` },
+        { text: "⏳ Timer", callback_data: `admin:timer:${targetChatId}` },
       ],
       [
         { text: "🚀 Send news now", callback_data: `admin:post:${targetChatId}` },

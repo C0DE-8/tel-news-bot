@@ -16,8 +16,6 @@ POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=6112214313
 TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
-CRON_SECRET=
-
 # DBMS Gateway
 SITE_ID=your_project_site_id
 API_KEY=full_dbms_api_key_not_the_short_prefix
@@ -45,7 +43,7 @@ Press the bot's `Start` button once to open the button menu. After that, manage 
 
 ```text
 📊 Status
-⏳ Cron
+⏳ Timer
 🚀 Send news now
 🛠 Admin panel
 🪪 Admin ID
@@ -69,7 +67,7 @@ The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the b
 Use `Select multiple` in the admin panel to apply one topic, interval, and limit to more than one group/channel from Telegram buttons.
 When an admin saves news settings, the bot writes to SQL first, reads the saved row back, verifies the values, then schedules or posts from that saved database config.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
-On Vercel, scheduled posting is handled by `GET /cron/post-news`, configured in `backend/vercel.json` to run every minute. The route only posts when the saved interval for a channel/group is due.
+Scheduled posting is handled by in-app timers. The bot reads saved SQL config, starts timers for enabled chats, and posts when each saved interval is reached.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.
 Admin controls and posting feedback go to the private admin chat. Channels/groups only receive news posts and test messages.
 If a group or channel message contains a code like `LF-IPC-CIVIC-XXXXAABBCC`, the bot replies with `https://zephyrequi.com is the investment site.` For channels, the Telegram webhook must allow `channel_post`.
@@ -96,8 +94,6 @@ POST /webhook/telegram/set
 GET /webhook/telegram/info
 DELETE /webhook/telegram
 POST /webhook/telegram/delete
-GET /cron/post-news
-POST /cron/post-news
 GET /test/ping
 POST /test/update
 ```
