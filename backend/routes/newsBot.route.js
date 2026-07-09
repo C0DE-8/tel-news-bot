@@ -1019,6 +1019,31 @@ class NewsBot {
     };
   }
 
+  async storageCheck() {
+    await ensureDataStore();
+
+    const checkId = `check_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const checkedAt = new Date().toISOString();
+    await db.execute(
+      "INSERT INTO tel_news_storage_checks (check_id, checked_at, note) VALUES (?, ?, ?)",
+      [checkId, checkedAt, "admin storage check"]
+    );
+
+    const [check] = await db.query("SELECT check_id, checked_at, note FROM tel_news_storage_checks WHERE check_id = ? LIMIT 1", [checkId]);
+    const counts = await getStorageCounts();
+
+    return {
+      ok: Boolean(check),
+      storage: {
+        version: STORAGE_VERSION,
+        type: "sql",
+        tables: ["tel_news_groups", "tel_news_chats", "tel_news_posted", "tel_news_storage_checks"],
+      },
+      wrote: check || null,
+      counts,
+    };
+  }
+
   async runDuePosts(now = new Date()) {
     const groups = await readJson(GROUPS_STORE);
     const summary = {
@@ -1847,6 +1872,18 @@ async function ensureDataTables() {
       ")",
     ].join(" ")
   );
+
+  await db.execute(
+    [
+      "CREATE TABLE IF NOT EXISTS tel_news_storage_checks (",
+      "check_id VARCHAR(96) NOT NULL,",
+      "checked_at VARCHAR(40) NOT NULL,",
+      "note VARCHAR(255) NULL,",
+      "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+      "PRIMARY KEY (check_id)",
+      ")",
+    ].join(" ")
+  );
 }
 
 function matchFirst(value, regex) {
@@ -2004,6 +2041,20 @@ async function writePosted(posted) {
       await db.execute("INSERT IGNORE INTO tel_news_posted (chat_id, fingerprint) VALUES (?, ?)", [chatId, fingerprint]);
     }
   }
+}
+
+async function getStorageCounts() {
+  const [groups] = await db.query("SELECT COUNT(*) AS count FROM tel_news_groups", []);
+  const [chats] = await db.query("SELECT COUNT(*) AS count FROM tel_news_chats", []);
+  const [posted] = await db.query("SELECT COUNT(*) AS count FROM tel_news_posted", []);
+  const [checks] = await db.query("SELECT COUNT(*) AS count FROM tel_news_storage_checks", []);
+
+  return {
+    groups: Number(groups?.count || 0),
+    chats: Number(chats?.count || 0),
+    posted: Number(posted?.count || 0),
+    storageChecks: Number(checks?.count || 0),
+  };
 }
 
 function numberOrNull(value) {

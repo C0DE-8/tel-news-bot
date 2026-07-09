@@ -8,6 +8,7 @@ function createAdminController({ bot }) {
     stopNews: (chatId) => bot.disableGroup(chatId),
     checkGroup: (chatId) => bot.checkGroupAccess(chatId),
     sendTestMessage: (payload) => bot.sendTestMessage(payload.chatId, payload.text),
+    storageCheck: () => bot.storageCheck(),
   };
 }
 

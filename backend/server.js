@@ -114,6 +114,8 @@ const server = http.createServer(async (req, res) => {
       "GET /bot/status",
       "GET /admin/news-config",
       "GET /admin/groups",
+      "GET /admin/storage-check",
+      "POST /admin/storage-check",
       "GET /admin/news-config/:chatId",
       "POST /admin/news-config",
       "POST /admin/news-start",

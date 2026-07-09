@@ -76,7 +76,43 @@ Expected:
 
 If this route is missing, or the version is not `sql-normalized-v2`, Vercel is still serving an old deployment.
 
-## 3. Set Telegram Webhook
+## 3. SQL Storage Write Check
+
+Purpose: Prove the deployed app can write to and read from the SQL database. This writes one row into `tel_news_storage_checks` and returns counts from the news tables.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/storage-check
+Headers:
+  Content-Type: application/json
+Body: {}
+```
+
+Expected:
+
+```json
+{
+  "ok": true,
+  "storage": {
+    "version": "sql-normalized-v2",
+    "type": "sql"
+  },
+  "wrote": {
+    "check_id": "check_...",
+    "checked_at": "..."
+  },
+  "counts": {
+    "groups": 0,
+    "chats": 0,
+    "posted": 0,
+    "storageChecks": 1
+  }
+}
+```
+
+In phpMyAdmin, check `tel_news_storage_checks`. If this table gets a row, database writes are working.
+
+## 4. Set Telegram Webhook
 
 Purpose: Tell Telegram to send bot updates to your live Vercel API.
 
@@ -103,7 +139,7 @@ Body:
 
 Use `dropPendingUpdates: true` after a webhook error like `500 Internal Server Error`. That clears Telegram's retry queue so old failed updates do not keep replaying. Keep `channel_post` in `allowedUpdates` so the bot can read channel posts.
 
-## 4. Check Webhook Info
+## 5. Check Webhook Info
 
 Purpose: Confirm Telegram is using your live webhook URL.
 
@@ -120,7 +156,7 @@ Look for:
 url = https://tel-news-bot-ivory.vercel.app/webhook/telegram
 ```
 
-## 5. Bot Runtime Status
+## 6. Bot Runtime Status
 
 Purpose: Check bot runtime mode, topics, whether admin restriction is active, and the schedule countdown for each saved chat.
 
@@ -131,7 +167,7 @@ Headers: none
 Body: none
 ```
 
-## 6. List Known Groups/Channels
+## 7. List Known Groups/Channels
 
 Purpose: See groups/channels the bot has learned from Telegram updates.
 
@@ -144,7 +180,7 @@ Body: none
 
 Important: Telegram does not let bots list every group/channel they are in. The bot learns a channel after it receives `my_chat_member` from Telegram. Keep `TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward` on Vercel so the channel always appears.
 
-## 7. Telegram Webhook Receiver
+## 8. Telegram Webhook Receiver
 
 Purpose: This is the route Telegram calls. You normally do not call this manually except for simulation.
 
@@ -180,7 +216,7 @@ Body:
 
 Use this only to simulate Telegram telling the bot it was added to a channel.
 
-## 8. Test Update Router
+## 9. Test Update Router
 
 Purpose: Simulate Telegram updates through the test route. This route is protected.
 
@@ -210,7 +246,7 @@ Body:
 }
 ```
 
-## 9. Test Investment Code Reply
+## 10. Test Investment Code Reply
 
 Purpose: Simulate a message containing an `LF-IPC` investment code. The bot should reply in the same chat with `https://zephyrequi.com is the investment site.`
 
@@ -284,7 +320,7 @@ Body:
 
 Important: after deploying this update, reset the Telegram webhook with `dropPendingUpdates: true` so Telegram uses the new `channel_post` allowed update.
 
-## 10. Check Channel Access
+## 11. Check Channel Access
 
 Purpose: Ask Telegram whether the bot can see the channel and whether it can post.
 
@@ -309,7 +345,7 @@ membership.status
 canPost
 ```
 
-## 11. Send Test Message To Channel
+## 12. Send Test Message To Channel
 
 Purpose: Verify the bot can send a real message into the selected channel.
 
@@ -330,7 +366,7 @@ Body:
 }
 ```
 
-## 12. Configure News Posting
+## 13. Configure News Posting
 
 Purpose: Configure the channel to receive news over time.
 
@@ -361,7 +397,7 @@ crypto
 politics
 ```
 
-## 13. Configure Multiple Chats
+## 14. Configure Multiple Chats
 
 Purpose: Configure the same news settings for more than one group/channel.
 
@@ -420,7 +456,7 @@ Expected result:
 }
 ```
 
-## 14. Configure Politics News
+## 15. Configure Politics News
 
 Purpose: Same as above, but politics.
 
@@ -442,7 +478,7 @@ Body:
 }
 ```
 
-## 15. Configure And Post Immediately
+## 16. Configure And Post Immediately
 
 Purpose: Save config and immediately send one news item.
 
@@ -466,7 +502,7 @@ Body:
 }
 ```
 
-## 16. Run Scheduled Post Check
+## 17. Run Scheduled Post Check
 
 Purpose: This is the route Vercel Cron calls. Use it in Talend to verify scheduled posting. It checks every saved group/channel and only posts when the saved interval is due.
 
@@ -513,7 +549,7 @@ If you set `CRON_SECRET`, use:
 URL: https://tel-news-bot-ivory.vercel.app/cron/post-news?secret=YOUR_SECRET
 ```
 
-## 17. Get All News Configs
+## 18. Get All News Configs
 
 Purpose: See all saved group/channel news configs.
 
@@ -524,7 +560,7 @@ Headers: none
 Body: none
 ```
 
-## 18. Get One Channel Config
+## 19. Get One Channel Config
 
 Purpose: See config for one channel, including `schedule.countdown` and `schedule.nextPostAt`.
 
@@ -535,7 +571,7 @@ Headers: none
 Body: none
 ```
 
-## 19. Start News For Channel
+## 20. Start News For Channel
 
 Purpose: Re-enable scheduled posting for the channel after it was stopped.
 
@@ -553,7 +589,7 @@ Body:
 }
 ```
 
-## 20. Stop News For Channel
+## 21. Stop News For Channel
 
 Purpose: Disable scheduled posting for the channel.
 
@@ -571,7 +607,7 @@ Body:
 }
 ```
 
-## 21. Delete Telegram Webhook
+## 22. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 

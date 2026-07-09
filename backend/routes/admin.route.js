@@ -29,6 +29,13 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
       return;
     }
 
+    if ((req.method === "GET" || req.method === "POST") && pathname === "/admin/storage-check") {
+      requireHttpAdmin(req);
+      const result = await controller.storageCheck();
+      sendJson(res, 200, result);
+      return;
+    }
+
     if (req.method === "GET" && pathname.startsWith("/admin/news-config/")) {
       requireHttpAdmin(req);
       const chatId = decodeURIComponent(pathname.replace("/admin/news-config/", ""));
@@ -97,6 +104,8 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
       routes: [
         "GET /admin/news-config",
         "GET /admin/groups",
+        "GET /admin/storage-check",
+        "POST /admin/storage-check",
         "GET /admin/news-config/:chatId",
         "POST /admin/news-config",
         "POST /admin/news-start",
