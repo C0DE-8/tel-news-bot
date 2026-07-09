@@ -12,6 +12,7 @@ const { getPathname, sendJson } = require("./utils/http");
 loadEnv();
 
 const db = require("./db");
+const APP_VERSION = "sql-normalized-v2";
 const PORT = Number(process.env.PORT || 3000);
 const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({
@@ -37,6 +38,25 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       sendJson(res, 503, { ok: false, error: error.message });
     }
+    return;
+  }
+
+  if (pathname === "/version") {
+    sendJson(res, 200, {
+      ok: true,
+      service: "Telegram news bot",
+      version: APP_VERSION,
+      storage: {
+        type: "sql",
+        tables: ["tel_news_groups", "tel_news_chats", "tel_news_posted"],
+        legacyFileStore: false,
+        legacyTmpPath: false,
+      },
+      runtime: {
+        vercel: Boolean(process.env.VERCEL),
+        useWebhook: process.env.TELEGRAM_USE_WEBHOOK === "true",
+      },
+    });
     return;
   }
 
@@ -90,6 +110,7 @@ const server = http.createServer(async (req, res) => {
     service: "Telegram news bot",
     routes: [
       "GET /health",
+      "GET /version",
       "GET /bot/status",
       "GET /admin/news-config",
       "GET /admin/groups",

@@ -44,21 +44,20 @@ npm run dev
 Press the bot's `Start` button once to open the button menu. After that, manage the bot from Telegram buttons:
 
 ```text
-Status
-Cron status
-Send news now
-Admin panel
-Admin ID
-Set news
-Select multiple
-Check group
-Send test
-Send news now
-Start
-Stop
-Back
-Main menu
-List configs
+📊 Status
+⏳ Cron
+🚀 Send news now
+🛠 Admin panel
+🪪 Admin ID
+📰 Set news
+✅ Select multiple chats
+✅ Check chat
+🧪 Test
+▶️ Start
+⏸ Stop
+⬅️ Back
+🏠 Main menu
+📋 List configs
 ```
 
 The bot stores chat settings, known chats, and posted-news fingerprints in real SQL tables: `tel_news_groups`, `tel_news_chats`, and `tel_news_posted`. The app creates those tables automatically; `backend/migrations/002_create_normalized_news_tables.sql` is the migration for manual setup/debugging. The old `tel_news_data` JSON table is no longer used by the bot.
@@ -78,6 +77,7 @@ If a group or channel message contains a code like `LF-IPC-CIVIC-XXXXAABBCC`, th
 
 ```text
 GET /health
+GET /version
 GET /bot/status
 GET /admin/news-config
 GET /admin/groups

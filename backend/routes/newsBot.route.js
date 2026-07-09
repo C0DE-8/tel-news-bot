@@ -8,6 +8,7 @@ const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
+const STORAGE_VERSION = "sql-normalized-v2";
 let dataStoreReady = false;
 let dataStorePromise = null;
 
@@ -118,6 +119,12 @@ class NewsBot {
       topics: Object.keys(NEWS_TOPICS),
       adminRestricted: this.adminChatIds.size > 0,
       scheduler: process.env.VERCEL ? "cron-route" : "local-timer",
+      storage: {
+        version: STORAGE_VERSION,
+        type: "sql",
+        tables: ["tel_news_groups", "tel_news_chats", "tel_news_posted"],
+        legacyFileStore: false,
+      },
       schedules: Object.fromEntries(
         Object.entries(groups).map(([chatId, group]) => [chatId, getScheduleStatus(group, now)])
       ),
@@ -504,7 +511,7 @@ class NewsBot {
           return;
         }
 
-        await this.sendMessage(chatId, `Selected ${selectedIds.length} chats.\nPick the news topic.`, {
+        await this.sendMessage(chatId, `✅ Selected ${selectedIds.length} chats\n\n📰 Pick the news topic to apply to all selected chats.`, {
           replyMarkup: topicKeyboard("selected"),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Choose topic.");
@@ -529,7 +536,7 @@ class NewsBot {
       }
 
       if (action === "configure") {
-        await this.sendMessage(chatId, "Pick the news topic for this chat.", {
+        await this.sendMessage(chatId, "📰 Pick the news topic for this chat.", {
           replyMarkup: topicKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Choose topic.");
@@ -537,7 +544,7 @@ class NewsBot {
       }
 
       if (action === "topic") {
-        await this.sendMessage(chatId, `Topic selected: ${topic}\nPick how often to post.`, {
+        await this.sendMessage(chatId, `📰 Topic selected: ${topic}\n\n⏱ Pick how often to post.`, {
           replyMarkup: intervalKeyboard(targetChatId, topic),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Choose interval.");
@@ -545,7 +552,7 @@ class NewsBot {
       }
 
       if (action === "interval") {
-        await this.sendMessage(chatId, `Interval selected: ${intervalMinutes} minutes\nPick how many posts to send.`, {
+        await this.sendMessage(chatId, `⏱ Interval selected: ${intervalMinutes} minutes\n\n🔢 Pick how many posts to send.`, {
           replyMarkup: limitKeyboard(targetChatId, topic, intervalMinutes),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Choose limit.");
@@ -580,7 +587,7 @@ class NewsBot {
           intervalMinutes,
           postLimit,
         });
-        await this.sendMessage(chatId, `Saved from button.\n${formatGroupConfig(targetChatId, group)}`, {
+        await this.sendMessage(chatId, `✅ Saved from button\n\n${formatGroupConfig(targetChatId, group)}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Saved.");
@@ -637,7 +644,7 @@ class NewsBot {
 
       if (action === "stop") {
         await this.disableGroup(targetChatId);
-        await this.sendMessage(chatId, `News stopped for ${targetChatId}.`, {
+        await this.sendMessage(chatId, `⏸ News stopped for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Stopped.");
@@ -646,7 +653,7 @@ class NewsBot {
 
       if (action === "start") {
         const group = await this.enableGroup(targetChatId);
-        await this.sendMessage(chatId, `News started for ${targetChatId}.\n${formatGroupConfig(targetChatId, group)}`, {
+        await this.sendMessage(chatId, `▶️ News started for ${targetChatId}\n\n${formatGroupConfig(targetChatId, group)}`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Started.");
@@ -765,8 +772,8 @@ class NewsBot {
   async sendAdminHelp(chatId, includeButtons = false) {
     const knownGroups = await this.listKnownGroups();
     const text = knownGroups.length
-      ? "Admin panel\nPick a chat below, then choose what the bot should do."
-      : "Admin panel\nNo known chats yet. Add the bot to a channel/group or set TELEGRAM_GROUP_CHAT_IDS, then open this panel again.";
+      ? "🛠 Admin panel\n\nPick one chat, or use Select multiple to update several chats at once."
+      : "🛠 Admin panel\n\nNo known chats yet. Add the bot to a channel/group or set TELEGRAM_GROUP_CHAT_IDS, then open this panel again.";
 
     await this.sendMessage(
       chatId,
@@ -776,21 +783,21 @@ class NewsBot {
   }
 
   async sendMainMenu(chatId) {
-    await this.sendMessage(chatId, "Choose an action.", {
+    await this.sendMessage(chatId, "🏠 Main menu\n\nChoose what you want to manage.", {
       replyMarkup: mainMenuKeyboard(chatId),
     });
   }
 
   async sendAdminPanel(chatId) {
     const knownGroups = await this.listKnownGroups();
-    await this.sendMessage(chatId, "Admin panel\nPick a chat to manage.", {
+    await this.sendMessage(chatId, "🛠 Admin panel\n\nPick one chat, or select multiple chats for a bulk update.", {
       replyMarkup: adminHomeKeyboard(chatId, knownGroups),
     });
   }
 
   async sendGroupPicker(chatId) {
     const knownGroups = await this.listKnownGroups();
-    await this.sendMessage(chatId, knownGroups.length ? "Pick a chat." : "No known chats yet.", {
+    await this.sendMessage(chatId, knownGroups.length ? "💬 Pick a chat to manage." : "No known chats yet.", {
       replyMarkup: groupPickerKeyboard(chatId, knownGroups),
     });
   }
@@ -801,7 +808,7 @@ class NewsBot {
     await this.sendMessage(
       chatId,
       knownGroups.length
-        ? `Select chats to configure.\nSelected: ${selectedIds.length}`
+        ? `✅ Select chats to configure\n\nSelected: ${selectedIds.length}\nTap a chat to add/remove it, then tap Set news for selected.`
         : "No known chats yet. Add the bot to channels/groups or set TELEGRAM_GROUP_CHAT_IDS.",
       {
         replyMarkup: multiPickerKeyboard(knownGroups, selectedIds),
@@ -1479,13 +1486,13 @@ function chatLabel(chat) {
 
 function formatGroupConfig(chatId, group) {
   return [
-    `Chat: ${chatId}`,
-    `Enabled: ${group.enabled ? "yes" : "no"}`,
-    `Topic: ${group.topic || "not set"}`,
-    `Every: ${group.intervalMinutes || "not set"} minutes`,
-    `Limit: ${group.postLimit || "none"}`,
-    `Start: ${group.postAt || "now"}`,
-    `Posts sent: ${group.postsSent || 0}`,
+    `💬 Chat: ${chatId}`,
+    `🔌 Enabled: ${group.enabled ? "yes" : "no"}`,
+    `📰 Topic: ${group.topic || "not set"}`,
+    `⏱ Every: ${group.intervalMinutes || "not set"} minutes`,
+    `🔢 Limit: ${group.postLimit || "none"}`,
+    `🚦 Start: ${group.postAt || "now"}`,
+    `📨 Posts sent: ${group.postsSent || 0}`,
     ...formatScheduleLines(group),
   ].join("\n");
 }
@@ -1493,8 +1500,8 @@ function formatGroupConfig(chatId, group) {
 function formatMultiConfigResult(groups) {
   const entries = Object.entries(groups || {});
   return [
-    `Saved news config for ${entries.length} chats.`,
-    ...entries.map(([chatId, group]) => `${chatId}: ${group.topic}, every ${group.intervalMinutes} minutes, limit ${group.postLimit || "none"}`),
+    `✅ Saved news config for ${entries.length} chats.`,
+    ...entries.map(([chatId, group]) => `• ${chatId}: ${group.topic}, every ${group.intervalMinutes} minutes, limit ${group.postLimit || "none"}`),
   ].join("\n");
 }
 
@@ -1502,18 +1509,18 @@ function formatCronStatus(chatId, group) {
   const status = group.schedule || getScheduleStatus(group);
 
   return [
-    `Cron status for ${chatId}`,
-    `Enabled: ${status.enabled ? "yes" : "no"}`,
-    `Due: ${status.due ? "yes" : "no"}`,
-    `Reason: ${status.reason}`,
-    `Interval: ${status.intervalMinutes || group.intervalMinutes || "not set"} minutes`,
-    status.enabled ? `Next post: ${status.due ? "due now" : status.countdown}` : null,
-    status.enabled ? `Next post at: ${status.nextPostAt}` : null,
-    `Posts sent: ${status.postsSent ?? Number(group.postsSent || 0)}`,
-    status.postLimit ? `Post limit: ${status.postLimit}` : "Post limit: none",
-    status.postLimit ? `Posts remaining: ${status.postsRemaining}` : null,
-    `Last post: ${status.lastScheduledPostAt || "none"}`,
-    `Last cron check: ${status.lastScheduledAttemptAt || "none"}`,
+    `⏳ Cron status for ${chatId}`,
+    `🔌 Enabled: ${status.enabled ? "yes" : "no"}`,
+    `🚦 Due: ${status.due ? "yes" : "no"}`,
+    `ℹ️ Reason: ${status.reason}`,
+    `⏱ Interval: ${status.intervalMinutes || group.intervalMinutes || "not set"} minutes`,
+    status.enabled ? `⏭ Next post: ${status.due ? "due now" : status.countdown}` : null,
+    status.enabled ? `🗓 Next post at: ${status.nextPostAt}` : null,
+    `📨 Posts sent: ${status.postsSent ?? Number(group.postsSent || 0)}`,
+    status.postLimit ? `🔢 Post limit: ${status.postLimit}` : "🔢 Post limit: none",
+    status.postLimit ? `📌 Posts remaining: ${status.postsRemaining}` : null,
+    `🕘 Last post: ${status.lastScheduledPostAt || "none"}`,
+    `🔁 Last cron check: ${status.lastScheduledAttemptAt || "none"}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1547,12 +1554,12 @@ function mainMenuKeyboard(currentChatId) {
   return {
     inline_keyboard: [
       [
-        { text: "Status", callback_data: `bot:status:${currentChatId}` },
-        { text: "Send news now", callback_data: `bot:news:${currentChatId}` },
+        { text: "📊 Status", callback_data: `bot:status:${currentChatId}` },
+        { text: "🚀 Send now", callback_data: `bot:news:${currentChatId}` },
       ],
       [
-        { text: "Admin panel", callback_data: `bot:admin:${currentChatId}` },
-        { text: "Admin ID", callback_data: "bot:id:this" },
+        { text: "🛠 Admin panel", callback_data: `bot:admin:${currentChatId}` },
+        { text: "🪪 Admin ID", callback_data: "bot:id:this" },
       ],
     ],
   };
@@ -1562,34 +1569,34 @@ function adminHomeKeyboard(currentChatId, knownGroups) {
   const rows = [];
 
   if (knownGroups.length) {
-    rows.push([{ text: "Pick chat", callback_data: "admin:groups:this" }]);
-    rows.push([{ text: "Select multiple", callback_data: "admin:multi:this" }]);
+    rows.push([{ text: "💬 Pick one chat", callback_data: "admin:groups:this" }]);
+    rows.push([{ text: "✅ Select multiple chats", callback_data: "admin:multi:this" }]);
     for (const group of knownGroups.slice(0, 8)) {
-      rows.push([{ text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` }]);
+      rows.push([{ text: `💬 ${formatChatLabel(group)}`.slice(0, 60), callback_data: `admin:group:${group.id}` }]);
     }
   }
 
   if (isLikelyGroupChatId(currentChatId)) {
-    rows.push([{ text: "Manage this chat", callback_data: `admin:group:${currentChatId}` }]);
+    rows.push([{ text: "📍 Manage this chat", callback_data: `admin:group:${currentChatId}` }]);
   }
 
-  rows.push([{ text: "Refresh chats", callback_data: "admin:groups:this" }]);
-  rows.push([{ text: "Admin ID", callback_data: "admin:id:this" }]);
-  rows.push([{ text: "Main menu", callback_data: "admin:main:this" }]);
+  rows.push([{ text: "🔄 Refresh chats", callback_data: "admin:groups:this" }]);
+  rows.push([{ text: "🪪 Admin ID", callback_data: "admin:id:this" }]);
+  rows.push([{ text: "🏠 Main menu", callback_data: "admin:main:this" }]);
 
   return { inline_keyboard: rows };
 }
 
 function groupPickerKeyboard(currentChatId, knownGroups) {
   const rows = knownGroups.slice(0, 20).map((group) => [
-    { text: formatChatLabel(group).slice(0, 60), callback_data: `admin:group:${group.id}` },
+    { text: `💬 ${formatChatLabel(group)}`.slice(0, 60), callback_data: `admin:group:${group.id}` },
   ]);
 
   if (isLikelyGroupChatId(currentChatId)) {
-    rows.push([{ text: "This chat", callback_data: `admin:group:${currentChatId}` }]);
+    rows.push([{ text: "📍 This chat", callback_data: `admin:group:${currentChatId}` }]);
   }
 
-  rows.push([{ text: "Back", callback_data: "admin:panel:this" }]);
+  rows.push([{ text: "⬅️ Back", callback_data: "admin:panel:this" }]);
   return { inline_keyboard: rows };
 }
 
@@ -1597,17 +1604,17 @@ function multiPickerKeyboard(knownGroups, selectedIds) {
   const selected = new Set(selectedIds);
   const rows = knownGroups.slice(0, 20).map((group) => [
     {
-      text: `${selected.has(group.id) ? "[x]" : "[ ]"} ${formatChatLabel(group)}`.slice(0, 60),
+      text: `${selected.has(group.id) ? "✅" : "⬜"} ${formatChatLabel(group)}`.slice(0, 60),
       callback_data: `admin:toggle:${group.id}`,
     },
   ]);
 
   rows.push([
-    { text: "Set news for selected", callback_data: "admin:selected:this" },
+    { text: "📰 Set news for selected", callback_data: "admin:selected:this" },
   ]);
   rows.push([
-    { text: "Clear", callback_data: "admin:clear:this" },
-    { text: "Back", callback_data: "admin:panel:this" },
+    { text: "🧹 Clear", callback_data: "admin:clear:this" },
+    { text: "⬅️ Back", callback_data: "admin:panel:this" },
   ]);
   return { inline_keyboard: rows };
 }
@@ -1616,29 +1623,29 @@ function adminKeyboard(targetChatId = "this") {
   return {
     inline_keyboard: [
       [
-        { text: "Set news", callback_data: `admin:configure:${targetChatId}` },
+        { text: "📰 Set news", callback_data: `admin:configure:${targetChatId}` },
       ],
       [
-        { text: "Status", callback_data: `admin:status:${targetChatId}` },
-        { text: "Cron status", callback_data: `admin:cron:${targetChatId}` },
+        { text: "📊 Status", callback_data: `admin:status:${targetChatId}` },
+        { text: "⏳ Cron", callback_data: `admin:cron:${targetChatId}` },
       ],
       [
-        { text: "Send news now", callback_data: `admin:post:${targetChatId}` },
+        { text: "🚀 Send news now", callback_data: `admin:post:${targetChatId}` },
       ],
       [
-        { text: "Check chat", callback_data: `admin:check:${targetChatId}` },
-        { text: "Send test", callback_data: `admin:test:${targetChatId}` },
+        { text: "✅ Check chat", callback_data: `admin:check:${targetChatId}` },
+        { text: "🧪 Test", callback_data: `admin:test:${targetChatId}` },
       ],
       [
-        { text: "Start", callback_data: `admin:start:${targetChatId}` },
-        { text: "Stop", callback_data: `admin:stop:${targetChatId}` },
+        { text: "▶️ Start", callback_data: `admin:start:${targetChatId}` },
+        { text: "⏸ Stop", callback_data: `admin:stop:${targetChatId}` },
       ],
       [
-        { text: "List configs", callback_data: "admin:list" },
+        { text: "📋 List configs", callback_data: "admin:list" },
       ],
       [
-        { text: "Back", callback_data: "admin:groups:this" },
-        { text: "Main menu", callback_data: "admin:main:this" },
+        { text: "⬅️ Back", callback_data: "admin:groups:this" },
+        { text: "🏠 Main menu", callback_data: "admin:main:this" },
       ],
     ],
   };
@@ -1648,10 +1655,10 @@ function topicKeyboard(targetChatId) {
   return {
     inline_keyboard: [
       [
-        { text: "Crypto", callback_data: `admin:topic:${targetChatId}:crypto` },
-        { text: "Politics", callback_data: `admin:topic:${targetChatId}:politics` },
+        { text: "₿ Crypto", callback_data: `admin:topic:${targetChatId}:crypto` },
+        { text: "🏛 Politics", callback_data: `admin:topic:${targetChatId}:politics` },
       ],
-      [{ text: "Back", callback_data: `admin:group:${targetChatId}` }],
+      [{ text: "⬅️ Back", callback_data: `admin:group:${targetChatId}` }],
     ],
   };
 }
@@ -1660,14 +1667,14 @@ function intervalKeyboard(targetChatId, topic) {
   return {
     inline_keyboard: [
       [
-        { text: "15 min", callback_data: `admin:interval:${targetChatId}:${topic}:15` },
-        { text: "30 min", callback_data: `admin:interval:${targetChatId}:${topic}:30` },
+        { text: "⏱ 15 min", callback_data: `admin:interval:${targetChatId}:${topic}:15` },
+        { text: "⏱ 30 min", callback_data: `admin:interval:${targetChatId}:${topic}:30` },
       ],
       [
-        { text: "1 hour", callback_data: `admin:interval:${targetChatId}:${topic}:60` },
-        { text: "3 hours", callback_data: `admin:interval:${targetChatId}:${topic}:180` },
+        { text: "🕐 1 hour", callback_data: `admin:interval:${targetChatId}:${topic}:60` },
+        { text: "🕒 3 hours", callback_data: `admin:interval:${targetChatId}:${topic}:180` },
       ],
-      [{ text: "Back", callback_data: `admin:configure:${targetChatId}` }],
+      [{ text: "⬅️ Back", callback_data: `admin:configure:${targetChatId}` }],
     ],
   };
 }
@@ -1676,14 +1683,14 @@ function limitKeyboard(targetChatId, topic, intervalMinutes) {
   return {
     inline_keyboard: [
       [
-        { text: "No limit", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}` },
-        { text: "5 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:5` },
+        { text: "∞ No limit", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}` },
+        { text: "5️⃣ 5 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:5` },
       ],
       [
-        { text: "10 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:10` },
-        { text: "25 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:25` },
+        { text: "🔟 10 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:10` },
+        { text: "🔢 25 posts", callback_data: `admin:set:${targetChatId}:${topic}:${intervalMinutes}:25` },
       ],
-      [{ text: "Back", callback_data: `admin:topic:${targetChatId}:${topic}` }],
+      [{ text: "⬅️ Back", callback_data: `admin:topic:${targetChatId}:${topic}` }],
     ],
   };
 }
