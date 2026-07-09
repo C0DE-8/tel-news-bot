@@ -22,9 +22,30 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
 
     if (req.method === "GET" && pathname === "/admin/groups") {
       requireHttpAdmin(req);
+      const checkAccess = new URL(req.url, "http://localhost").searchParams.get("check") === "true";
       sendJson(res, 200, {
         ok: true,
-        groups: await controller.listGroups(),
+        groups: await controller.listGroups({ checkAccess }),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/admin/groups") {
+      const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
+      sendJson(res, 200, {
+        ok: true,
+        result: await controller.addGroup(payload),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/admin/groups/refresh") {
+      const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
+      sendJson(res, 200, {
+        ok: true,
+        groups: await controller.refreshGroups(),
       });
       return;
     }
@@ -74,6 +95,14 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/admin/news-due") {
+      const payload = await readJsonBody(req);
+      requireHttpAdmin(req, payload);
+      const result = await controller.runDuePosts();
+      sendJson(res, 200, { ok: true, result });
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/admin/group-check") {
       const payload = await readJsonBody(req);
       requireHttpAdmin(req, payload);
@@ -104,10 +133,14 @@ async function handleAdminRoute(req, res, controller, requireHttpAdmin) {
       routes: [
         "GET /admin/news-config",
         "GET /admin/groups",
+        "GET /admin/groups?check=true",
+        "POST /admin/groups",
+        "POST /admin/groups/refresh",
         "GET /admin/storage-check",
         "POST /admin/storage-check",
         "GET /admin/news-config/:chatId",
         "POST /admin/news-config",
+        "POST /admin/news-due",
         "POST /admin/news-start",
         "POST /admin/news-stop",
         "POST /admin/group-check",

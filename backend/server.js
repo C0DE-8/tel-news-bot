@@ -12,7 +12,7 @@ const { getPathname, sendJson } = require("./utils/http");
 loadEnv();
 
 const db = require("./db");
-const APP_VERSION = "sql-normalized-v3-db-gateway-fallback";
+const APP_VERSION = "sql-normalized-v5-request-driven-scheduler";
 const PORT = Number(process.env.PORT || 3000);
 const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({
@@ -90,10 +90,14 @@ const server = http.createServer(async (req, res) => {
       "GET /bot/status",
       "GET /admin/news-config",
       "GET /admin/groups",
+      "GET /admin/groups?check=true",
+      "POST /admin/groups",
+      "POST /admin/groups/refresh",
       "GET /admin/storage-check",
       "POST /admin/storage-check",
       "GET /admin/news-config/:chatId",
       "POST /admin/news-config",
+      "POST /admin/news-due",
       "POST /admin/news-start",
       "POST /admin/news-stop",
       "POST /admin/group-check",

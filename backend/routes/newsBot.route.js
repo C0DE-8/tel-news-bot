@@ -8,9 +8,10 @@ const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
-const STORAGE_VERSION = "sql-normalized-v3-db-gateway-fallback";
+const STORAGE_VERSION = "sql-normalized-v5-request-driven-scheduler";
 let dataStoreReady = false;
 let dataStorePromise = null;
+let duePostPromise = null;
 
 const NEWS_TOPICS = {
   crypto: [
@@ -92,6 +93,7 @@ class NewsBot {
 
   async initializeStorageAndRuntime() {
     await ensureDataStore();
+    await this.seedConfiguredGroups();
     await this.restoreScheduledPosts();
 
     if (this.useWebhook) {
@@ -103,6 +105,7 @@ class NewsBot {
   }
 
   async getStatus() {
+    const duePosts = await this.processDuePosts({ source: "bot-status" });
     const groups = await readJson(GROUPS_STORE);
     const activeGroups = Object.values(groups).filter((group) => group.enabled).length;
     const now = new Date();
@@ -114,7 +117,8 @@ class NewsBot {
       activeGroups,
       topics: Object.keys(NEWS_TOPICS),
       adminRestricted: this.adminChatIds.size > 0,
-      scheduler: "timer",
+      scheduler: "request-driven-timer",
+      duePosts,
       storage: {
         version: STORAGE_VERSION,
         type: "sql",
@@ -128,18 +132,115 @@ class NewsBot {
   }
 
   async listGroupConfigs() {
+    await this.processDuePosts({ source: "list-configs" });
     return addScheduleStatuses(await readJson(GROUPS_STORE));
   }
 
-  async listKnownGroups() {
+  async listKnownGroups(options = {}) {
+    await this.seedConfiguredGroups();
     const chats = await readJson(CHATS_STORE);
     const learnedGroups = Object.values(chats).filter((chat) => isGroupChatType(chat.type));
-    const groups = new Map();
+    const configs = await readJson(GROUPS_STORE);
+    let groups = learnedGroups.map((group) => ({
+      ...group,
+      configured: Boolean(configs[group.id]),
+      newsEnabled: Boolean(configs[group.id]?.enabled),
+      topic: configs[group.id]?.topic || null,
+    }));
 
-    for (const group of this.configuredGroups) groups.set(group.id, group);
-    for (const group of learnedGroups) groups.set(group.id, group);
+    if (options.checkAccess) {
+      groups = await Promise.all(
+        groups.map(async (group) => {
+          try {
+            const result = await this.checkGroupAccess(group.id);
+            return {
+              ...group,
+              title: result.chat.title || result.chat.username || group.title,
+              type: result.chat.type || group.type,
+              username: result.chat.username || group.username,
+              botStatus: result.membership.status,
+              canPost: result.canPost,
+              accessError: null,
+            };
+          } catch (error) {
+            return {
+              ...group,
+              botStatus: null,
+              canPost: false,
+              accessError: error.message,
+            };
+          }
+        })
+      );
+    }
 
-    return [...groups.values()];
+    return groups.sort((a, b) => String(a.title || a.id).localeCompare(String(b.title || b.id)));
+  }
+
+  async seedConfiguredGroups() {
+    if (!this.configuredGroups.length) return [];
+
+    const chats = await readJson(CHATS_STORE);
+    let changed = false;
+    const now = new Date().toISOString();
+
+    for (const group of this.configuredGroups) {
+      const current = chats[group.id] || {};
+      chats[group.id] = {
+        id: group.id,
+        title: current.title || group.title || group.id,
+        type: current.type || group.type || inferChatType(group.id),
+        username: current.username || group.username || null,
+        updatedAt: current.updatedAt || now,
+        source: current.source || "env",
+      };
+      changed = true;
+    }
+
+    if (changed) await writeJson(CHATS_STORE, chats);
+    return this.configuredGroups;
+  }
+
+  async addKnownGroup(payload = {}) {
+    const chatId = String(payload.chatId || "").trim();
+    if (!chatId) throwHttpError(400, "chatId is required");
+
+    if (payload.verify !== false) {
+      const result = await this.checkGroupAccess(chatId);
+      return {
+        chat: await this.getKnownChat(chatId),
+        access: {
+          botStatus: result.membership.status,
+          canPost: result.canPost,
+        },
+      };
+    }
+
+    const chats = await readJson(CHATS_STORE);
+    chats[chatId] = {
+      id: chatId,
+      title: String(payload.title || chatId).trim(),
+      type: String(payload.type || inferChatType(chatId)).trim(),
+      username: payload.username || null,
+      updatedAt: new Date().toISOString(),
+      source: "manual",
+    };
+    await writeJson(CHATS_STORE, chats);
+
+    return {
+      chat: chats[chatId],
+      access: null,
+    };
+  }
+
+  async refreshKnownGroups() {
+    await this.seedConfiguredGroups();
+    return this.listKnownGroups({ checkAccess: true });
+  }
+
+  async getKnownChat(chatId) {
+    const chats = await readJson(CHATS_STORE);
+    return chats[String(chatId)] || null;
   }
 
   async getGroupConfig(chatId) {
@@ -278,6 +379,8 @@ class NewsBot {
   }
 
   async handleTelegramUpdate(update) {
+    await this.processDuePosts({ source: "telegram-update" });
+
     if (update.message) {
       await this.rememberChat(update.message.chat);
       if (update.message.text) await this.handleMessage(update.message);
@@ -312,6 +415,7 @@ class NewsBot {
       type: chat.type,
       username: chat.username || null,
       updatedAt: new Date().toISOString(),
+      source: chats[chatId]?.source || "telegram",
     };
     await writeJson(CHATS_STORE, chats);
   }
@@ -622,8 +726,9 @@ class NewsBot {
       }
 
       if (action === "timer") {
+        const duePosts = await this.processDuePosts({ source: "timer-button" });
         const group = await this.getGroupConfig(targetChatId);
-        await this.sendMessage(chatId, group ? formatTimerStatus(targetChatId, group) : `No config found for ${targetChatId}.`, {
+        await this.sendMessage(chatId, group ? formatTimerStatus(targetChatId, group, duePosts) : `No config found for ${targetChatId}.`, {
           replyMarkup: adminKeyboard(targetChatId),
         });
         await this.answerCallbackQuery(callbackQuery.id, "Timer status sent.");
@@ -987,6 +1092,7 @@ class NewsBot {
   }
 
   async sendChatStatus(outputChatId, targetChatId = outputChatId) {
+    await this.processDuePosts({ source: "chat-status" });
     const groups = await readJson(GROUPS_STORE);
     const group = groups[targetChatId];
 
@@ -1079,6 +1185,58 @@ class NewsBot {
     for (const [chatId, group] of Object.entries(groups)) {
       if (group.enabled) this.scheduleGroup(chatId, group);
     }
+  }
+
+  async processDuePosts(options = {}) {
+    if (duePostPromise) return duePostPromise;
+
+    duePostPromise = this.runDuePosts(options).finally(() => {
+      duePostPromise = null;
+    });
+
+    return duePostPromise;
+  }
+
+  async runDuePosts(options = {}) {
+    const now = options.now || new Date();
+    const groups = await readJson(GROUPS_STORE);
+    const dueEntries = Object.entries(groups).filter(([, group]) => getScheduleDueState(group, now).ready);
+
+    if (!dueEntries.length) {
+      return { checkedAt: now.toISOString(), source: options.source || "unknown", checked: Object.keys(groups).length, due: 0, posted: 0, errors: [] };
+    }
+
+    for (const [chatId, group] of dueEntries) {
+      groups[chatId] = {
+        ...group,
+        lastScheduledAttemptAt: now.toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    await writeJson(GROUPS_STORE, groups);
+
+    const results = [];
+    for (const [chatId] of dueEntries) {
+      try {
+        const result = await this.postNewsNow(chatId, { scheduled: true, now, silentNoConfig: true });
+        results.push({ chatId, posted: Boolean(result?.posted), article: result?.article?.title || null });
+      } catch (error) {
+        results.push({ chatId, posted: false, error: error.message });
+        await this.sendAdminUpdate(`Scheduled post failed for ${chatId}: ${error.message}`, {
+          replyMarkup: adminKeyboard(chatId),
+        });
+      }
+    }
+
+    return {
+      checkedAt: now.toISOString(),
+      source: options.source || "unknown",
+      checked: Object.keys(groups).length,
+      due: dueEntries.length,
+      posted: results.filter((result) => result.posted).length,
+      errors: results.filter((result) => result.error),
+      results,
+    };
   }
 
   scheduleGroup(chatId, group) {
@@ -1423,7 +1581,7 @@ function parseConfiguredGroups(value) {
       return {
         id,
         title: title || id,
-        type: "group",
+        type: inferChatType(id),
         username: null,
         updatedAt: null,
         source: "env",
@@ -1449,6 +1607,10 @@ function normalizeChatIds(value) {
 
 function isGroupChatType(type) {
   return ["group", "supergroup", "channel"].includes(type);
+}
+
+function inferChatType(chatId) {
+  return String(chatId).startsWith("-100") ? "channel" : "group";
 }
 
 function isLikelyGroupChatId(chatId) {
@@ -1485,11 +1647,15 @@ function formatMultiConfigResult(groups) {
   ].join("\n");
 }
 
-function formatTimerStatus(chatId, group) {
+function formatTimerStatus(chatId, group, duePosts) {
   const status = group.schedule || getScheduleStatus(group);
+  const result = duePosts?.results?.find((item) => item.chatId === String(chatId));
 
   return [
     `⏳ Timer status for ${chatId}`,
+    duePosts ? `🔎 Due check: ${duePosts.posted}/${duePosts.due} posted` : null,
+    result?.error ? `⚠️ Last due error: ${result.error}` : null,
+    result?.posted ? `✅ Due post sent: ${result.article || "news posted"}` : null,
     `🔌 Enabled: ${status.enabled ? "yes" : "no"}`,
     `🚦 Due: ${status.due ? "yes" : "no"}`,
     `ℹ️ Reason: ${status.reason}`,

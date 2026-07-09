@@ -13,7 +13,7 @@ Content-Type: application/json
 ```
 
 Admin/test/webhook-management routes use `TELEGRAM_ADMIN_CHAT_IDS` from the server environment. You do not add that value as a Talend header.
-Scheduled posting uses in-app timers from saved SQL config. There is no cron route.
+Scheduled posting is request-driven from saved SQL config. There is no cron route. Use `POST /admin/news-due` to make the server check SQL and post due news.
 
 On Vercel, also set this environment variable so the bot always knows which channel to post into:
 
@@ -66,7 +66,7 @@ Expected:
 ```json
 {
   "ok": true,
-  "version": "sql-normalized-v3-db-gateway-fallback",
+  "version": "sql-normalized-v5-request-driven-scheduler",
   "storage": {
     "type": "sql",
     "legacyFileStore": false
@@ -74,7 +74,7 @@ Expected:
 }
 ```
 
-If this route is missing, or the version is not `sql-normalized-v3-db-gateway-fallback`, Vercel is still serving an old deployment.
+If this route is missing, or the version is not `sql-normalized-v5-request-driven-scheduler`, Vercel is still serving an old deployment.
 
 ## 3. SQL Storage Write Check
 
@@ -94,7 +94,7 @@ Expected:
 {
   "ok": true,
   "storage": {
-    "version": "sql-normalized-v3-db-gateway-fallback",
+    "version": "sql-normalized-v5-request-driven-scheduler",
     "type": "sql"
   },
   "wrote": {
@@ -169,7 +169,7 @@ Body: none
 
 ## 7. List Known Groups/Channels
 
-Purpose: See groups/channels the bot has learned from Telegram updates.
+Purpose: See groups/channels saved in the SQL `tel_news_chats` registry. On startup, the bot saves `TELEGRAM_GROUP_CHAT_IDS` into this table. It also saves chats it learns from Telegram updates.
 
 ```text
 Method: GET
@@ -178,9 +178,62 @@ Headers: none
 Body: none
 ```
 
-Important: Telegram does not let bots list every group/channel they are in. The bot learns a channel after it receives `my_chat_member` from Telegram. Keep `TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward` on Vercel so the channel always appears.
+To verify whether the bot can still access/post to known chats:
 
-## 8. Telegram Webhook Receiver
+```text
+Method: GET
+URL: https://tel-news-bot-ivory.vercel.app/admin/groups?check=true
+Headers: none
+Body: none
+```
+
+Important: Telegram does not let bots list every group/channel they are in. The bot can show only chats it knows from SQL, `TELEGRAM_GROUP_CHAT_IDS`, or incoming Telegram updates.
+
+## 8. Add Group/Channel To SQL Registry
+
+Purpose: Add a group/channel id to `tel_news_chats` so it appears in Telegram buttons and API lists.
+
+Verified add, recommended when the bot is already in the group/channel:
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/groups
+Headers:
+  Content-Type: application/json
+Body:
+```
+
+```json
+{
+  "chatId": "-1002195390106",
+  "verify": true
+}
+```
+
+Manual add without Telegram verification:
+
+```json
+{
+  "chatId": "-1002195390106",
+  "title": "Liberty forward",
+  "type": "channel",
+  "verify": false
+}
+```
+
+## 9. Refresh/Check Known Groups
+
+Purpose: Seed `TELEGRAM_GROUP_CHAT_IDS` into SQL, then check all known chats with Telegram.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/groups/refresh
+Headers:
+  Content-Type: application/json
+Body: {}
+```
+
+## 10. Telegram Webhook Receiver
 
 Purpose: This is the route Telegram calls. You normally do not call this manually except for simulation.
 
@@ -216,7 +269,7 @@ Body:
 
 Use this only to simulate Telegram telling the bot it was added to a channel.
 
-## 9. Test Update Router
+## 11. Test Update Router
 
 Purpose: Simulate Telegram updates through the test route. This route is protected.
 
@@ -246,7 +299,7 @@ Body:
 }
 ```
 
-## 10. Test Investment Code Reply
+## 12. Test Investment Code Reply
 
 Purpose: Simulate a message containing an `LF-IPC` investment code. The bot should reply in the same chat with `https://zephyrequi.com is the investment site.`
 
@@ -320,7 +373,7 @@ Body:
 
 Important: after deploying this update, reset the Telegram webhook with `dropPendingUpdates: true` so Telegram uses the new `channel_post` allowed update.
 
-## 11. Check Channel Access
+## 13. Check Channel Access
 
 Purpose: Ask Telegram whether the bot can see the channel and whether it can post.
 
@@ -345,7 +398,7 @@ membership.status
 canPost
 ```
 
-## 12. Send Test Message To Channel
+## 14. Send Test Message To Channel
 
 Purpose: Verify the bot can send a real message into the selected channel.
 
@@ -366,7 +419,7 @@ Body:
 }
 ```
 
-## 13. Configure News Posting
+## 15. Configure News Posting
 
 Purpose: Configure the channel to receive news over time.
 
@@ -397,7 +450,7 @@ crypto
 politics
 ```
 
-## 14. Configure Multiple Chats
+## 16. Configure Multiple Chats
 
 Purpose: Configure the same news settings for more than one group/channel.
 
@@ -456,7 +509,7 @@ Expected result:
 }
 ```
 
-## 15. Configure Politics News
+## 17. Configure Politics News
 
 Purpose: Same as above, but politics.
 
@@ -478,7 +531,7 @@ Body:
 }
 ```
 
-## 16. Configure And Post Immediately
+## 18. Configure And Post Immediately
 
 Purpose: Save config and immediately send one news item.
 
@@ -502,7 +555,7 @@ Body:
 }
 ```
 
-## 17. Check Timer Status
+## 19. Check Timer Status
 
 Purpose: Verify the saved SQL config and countdown for the in-app timer.
 
@@ -521,7 +574,39 @@ group.schedule.nextPostInSeconds
 group.schedule.countdown
 ```
 
-## 18. Get All News Configs
+## 20. Run Due News Check
+
+Purpose: Ask the server to read SQL, find enabled chats where the saved schedule is due, and post news for those chats. This is the replacement for cron on Vercel.
+
+```text
+Method: POST
+URL: https://tel-news-bot-ivory.vercel.app/admin/news-due
+Headers:
+  Content-Type: application/json
+Body: {}
+```
+
+Expected shape:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "checked": 1,
+    "due": 1,
+    "posted": 1,
+    "results": [
+      {
+        "chatId": "-1002195390106",
+        "posted": true,
+        "article": "..."
+      }
+    ]
+  }
+}
+```
+
+## 21. Get All News Configs
 
 Purpose: See all saved group/channel news configs.
 
@@ -532,7 +617,7 @@ Headers: none
 Body: none
 ```
 
-## 19. Get One Channel Config
+## 22. Get One Channel Config
 
 Purpose: See config for one channel, including `schedule.countdown` and `schedule.nextPostAt`.
 
@@ -543,7 +628,7 @@ Headers: none
 Body: none
 ```
 
-## 20. Start News For Channel
+## 23. Start News For Channel
 
 Purpose: Re-enable scheduled posting for the channel after it was stopped.
 
@@ -561,7 +646,7 @@ Body:
 }
 ```
 
-## 21. Stop News For Channel
+## 24. Stop News For Channel
 
 Purpose: Disable scheduled posting for the channel.
 
@@ -579,7 +664,7 @@ Body:
 }
 ```
 
-## 22. Delete Telegram Webhook
+## 25. Delete Telegram Webhook
 
 Purpose: Remove webhook if you want to switch back to polling/local development.
 
@@ -596,12 +681,14 @@ Body: none
 2. `POST /webhook/telegram/set`
 3. `GET /webhook/telegram/info`
 4. Add bot to your Telegram channel and make it admin
-5. Wait for Telegram `my_chat_member`, or keep the channel in `TELEGRAM_GROUP_CHAT_IDS`
+5. Wait for Telegram `my_chat_member`, keep the channel in `TELEGRAM_GROUP_CHAT_IDS`, or `POST /admin/groups`
 6. `GET /admin/groups`
-7. `POST /admin/group-check`
-8. `POST /admin/group-test-message`
-9. `POST /admin/news-config`
-10. `GET /admin/news-config/-1002195390106`
+7. `GET /admin/groups?check=true`
+8. `POST /admin/group-check`
+9. `POST /admin/group-test-message`
+10. `POST /admin/news-config`
+11. `POST /admin/news-due`
+12. `GET /admin/news-config/-1002195390106`
 
 ## Replacements
 

@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS tel_news_chats (
+  chat_id VARCHAR(64) NOT NULL,
+  title VARCHAR(255) NULL,
+  chat_type VARCHAR(32) NULL,
+  username VARCHAR(255) NULL,
+  source VARCHAR(32) NULL,
+  updated_at VARCHAR(40) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (chat_id)
+);

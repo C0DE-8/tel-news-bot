@@ -64,11 +64,12 @@ The connector accepts either `https://api.dbms.copupbid.com/api` or `https://api
 
 If `TELEGRAM_ADMIN_CHAT_IDS` is set, only those Telegram users can change settings or force posts.
 Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` button if you need your Telegram user id.
-The picker shows channels/groups from `TELEGRAM_GROUP_CHAT_IDS` plus chats the bot has seen while running. On Vercel, set `TELEGRAM_GROUP_CHAT_IDS` because serverless runtime storage is temporary.
+The picker shows channels/groups from the SQL `tel_news_chats` registry. On startup, the bot saves `TELEGRAM_GROUP_CHAT_IDS` into that table, and it also saves chats it sees from Telegram updates. Admins can add more chat IDs through `POST /admin/groups`.
+Telegram does not provide a bot API to list every group/channel the bot belongs to. The bot can only show chats it knows from SQL, env seeding, or incoming Telegram updates. Use `GET /admin/groups?check=true` or `POST /admin/groups/refresh` to verify whether the bot can still access/post to known chats.
 Use `Select multiple` in the admin panel to apply one topic, interval, and limit to more than one group/channel from Telegram buttons.
 When an admin saves news settings, the bot writes to SQL first, reads the saved row back, verifies the values, then schedules or posts from that saved database config.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
-Scheduled posting is handled by in-app timers. The bot reads saved SQL config, starts timers for enabled chats, and posts when each saved interval is reached.
+Scheduled posting is request-driven on Vercel. The bot reads saved SQL config and checks due posts whenever Telegram webhook/admin/status requests hit the app. Use `POST /admin/news-due` from Talend or any uptime monitor to force a due-check without manually choosing a news item.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.
 Admin controls and posting feedback go to the private admin chat. Channels/groups only receive news posts and test messages.
 If a group or channel message contains a code like `LF-IPC-CIVIC-XXXXAABBCC`, the bot replies with `https://zephyrequi.com is the investment site.` For channels, the Telegram webhook must allow `channel_post`.
@@ -81,10 +82,14 @@ GET /version
 GET /bot/status
 GET /admin/news-config
 GET /admin/groups
+GET /admin/groups?check=true
+POST /admin/groups
+POST /admin/groups/refresh
 GET /admin/storage-check
 POST /admin/storage-check
 GET /admin/news-config/:chatId
 POST /admin/news-config
+POST /admin/news-due
 POST /admin/news-start
 POST /admin/news-stop
 POST /admin/group-check
