@@ -15,7 +15,7 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 POST_INTERVAL_MINUTES=30
 TELEGRAM_USE_WEBHOOK=false
 TELEGRAM_ADMIN_CHAT_IDS=6112214313
-TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
+TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward,-1003946270146|Liberty forward Trump Stock,-1004313221663|Liberty forward Grant
 # DBMS Gateway
 SITE_ID=your_project_site_id
 API_KEY=full_dbms_api_key_not_the_short_prefix
@@ -67,7 +67,8 @@ Use the `Admin panel` button to manage the bot. The panel has an `Admin ID` butt
 The picker shows channels/groups from the SQL `tel_news_chats` registry. On startup, the bot saves `TELEGRAM_GROUP_CHAT_IDS` into that table, and it also saves chats it sees from Telegram updates. Admins can add more chat IDs through `POST /admin/groups`.
 Telegram does not provide a bot API to list every group/channel the bot belongs to. The bot can only show chats it knows from SQL, env seeding, or incoming Telegram updates. Use `GET /admin/groups?check=true` or `POST /admin/groups/refresh` to verify whether the bot can still access/post to known chats.
 Use `Select multiple` in the admin panel to apply one topic, interval, and limit to more than one group/channel from Telegram buttons.
-When an admin saves news settings, the bot writes to SQL first, reads the saved row back, verifies the values, then schedules or posts from that saved database config.
+When an admin saves news settings, the bot writes to SQL first, reads the saved row back, verifies the values, then schedules or posts from that saved database config. Multi-chat posting is stored as one SQL config row per chat in `tel_news_groups`.
+Before sending an article, the bot claims the article fingerprint in `tel_news_posted`; if the same chat already has that title or URL fingerprint, it skips that article so one group/channel does not receive the same news message twice.
 Manual `Send news now` clicks have a 10-second cooldown per group/channel.
 Scheduled posting is request-driven on Vercel. The bot reads saved SQL config and checks due posts whenever Telegram webhook/admin/status requests hit the app. Use `POST /admin/news-due` from Talend or any uptime monitor to force a due-check without manually choosing a news item.
 Status responses include `schedule.nextPostAt`, `schedule.nextPostInSeconds`, and `schedule.countdown` so you can see when the next post should happen.

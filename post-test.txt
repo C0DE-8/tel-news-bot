@@ -18,7 +18,7 @@ Scheduled posting is request-driven from saved SQL config. There is no cron rout
 On Vercel, also set this environment variable so the bot always knows which channel to post into:
 
 ```text
-TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward
+TELEGRAM_GROUP_CHAT_IDS=-1002195390106|Liberty forward,-1003946270146|Liberty forward Trump Stock,-1004313221663|Liberty forward Grant
 ```
 
 Use the real Telegram channel id. Channel ids are usually negative numbers.
@@ -30,6 +30,8 @@ tel_news_groups
 tel_news_chats
 tel_news_posted
 ```
+
+Multi-channel posting is saved as one row per chat in `tel_news_groups`. Duplicate prevention is per chat in `tel_news_posted`; if a chat already has the same normalized title or URL fingerprint, the bot skips that article instead of sending it again.
 
 Run `backend/migrations/002_create_normalized_news_tables.sql` manually only if you want to create the tables before the app auto-creates them.
 
@@ -66,7 +68,7 @@ Expected:
 ```json
 {
   "ok": true,
-  "version": "sql-normalized-v5-request-driven-scheduler",
+  "version": "sql-normalized-v6-multi-chat-dedupe",
   "storage": {
     "type": "sql",
     "legacyFileStore": false
@@ -74,7 +76,7 @@ Expected:
 }
 ```
 
-If this route is missing, or the version is not `sql-normalized-v5-request-driven-scheduler`, Vercel is still serving an old deployment.
+If this route is missing, or the version is not `sql-normalized-v6-multi-chat-dedupe`, Vercel is still serving an old deployment.
 
 ## 3. SQL Storage Write Check
 
@@ -94,7 +96,7 @@ Expected:
 {
   "ok": true,
   "storage": {
-    "version": "sql-normalized-v5-request-driven-scheduler",
+    "version": "sql-normalized-v6-multi-chat-dedupe",
     "type": "sql"
   },
   "wrote": {
@@ -468,7 +470,8 @@ Body:
 {
   "chatIds": [
     "-1002195390106",
-    "-1000000000002"
+    "-1003946270146",
+    "-1004313221663"
   ],
   "topic": "crypto",
   "intervalMinutes": 15,
@@ -481,7 +484,7 @@ Or use comma-separated ids:
 
 ```json
 {
-  "chatIds": "-1002195390106,-1000000000002",
+  "chatIds": "-1002195390106,-1003946270146,-1004313221663",
   "topic": "crypto",
   "intervalMinutes": 15,
   "postLimit": 10,
@@ -500,7 +503,12 @@ Expected result:
       "intervalMinutes": 15,
       "postLimit": 10
     },
-    "-1000000000002": {
+    "-1003946270146": {
+      "topic": "crypto",
+      "intervalMinutes": 15,
+      "postLimit": 10
+    },
+    "-1004313221663": {
       "topic": "crypto",
       "intervalMinutes": 15,
       "postLimit": 10

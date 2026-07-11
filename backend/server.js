@@ -12,7 +12,7 @@ const { getPathname, sendJson } = require("./utils/http");
 loadEnv();
 
 const db = require("./db");
-const APP_VERSION = "sql-normalized-v5-request-driven-scheduler";
+const APP_VERSION = "sql-normalized-v6-multi-chat-dedupe";
 const PORT = Number(process.env.PORT || 3000);
 const requireHttpAdmin = createHttpAdminGuard(process.env.TELEGRAM_ADMIN_CHAT_IDS);
 const newsBotRoute = createNewsBotRoute({

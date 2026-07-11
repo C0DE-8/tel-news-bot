@@ -8,7 +8,7 @@ const MANUAL_POST_COOLDOWN_MS = 10 * 1000;
 const INVESTMENT_SITE_URL = "https://zephyrequi.com";
 const INVESTMENT_CODE_REGEX = /\bLF-IPC-(CIVIC|STEWAR|SELECT|DISTIN)-[A-Z0-9]{4}[A-F0-9]{6}\b/i;
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"];
-const STORAGE_VERSION = "sql-normalized-v5-request-driven-scheduler";
+const STORAGE_VERSION = "sql-normalized-v6-multi-chat-dedupe";
 let dataStoreReady = false;
 let dataStorePromise = null;
 let duePostPromise = null;
@@ -1842,10 +1842,6 @@ function limitKeyboard(targetChatId, topic, intervalMinutes) {
 }
 
 async function findFreshArticle(chatId, topic) {
-  const posted = await readJson(POSTED_STORE);
-  posted[chatId] ||= [];
-  const seen = new Set(posted[chatId]);
-
   const articles = [];
   for (const feedUrl of NEWS_TOPICS[topic]) {
     try {
@@ -1860,15 +1856,57 @@ async function findFreshArticle(chatId, topic) {
       ...article,
       fingerprints: articleFingerprints(article),
     }))
-    .filter((article) => article.title && article.link && !seen.has(article.link) && !article.fingerprints.some((fingerprint) => seen.has(fingerprint)))
+    .filter((article) => article.title && article.link)
     .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
 
-  const article = freshArticles[0];
-  if (!article) return null;
+  for (const article of freshArticles) {
+    if (await claimArticleForChat(chatId, article)) return article;
+  }
 
-  posted[chatId] = [article.link, ...article.fingerprints, ...posted[chatId]].slice(0, 200);
-  await writeJson(POSTED_STORE, posted);
-  return article;
+  return null;
+}
+
+async function claimArticleForChat(chatId, article) {
+  const fingerprints = [...new Set([article.link, ...article.fingerprints].filter(Boolean))];
+  if (!fingerprints.length) return false;
+
+  if (await hasPostedFingerprint(chatId, fingerprints)) return false;
+
+  const primaryFingerprint = article.fingerprints.find((fingerprint) => fingerprint.startsWith("title:")) || article.fingerprints[0] || article.link;
+  const result = await db.execute("INSERT IGNORE INTO tel_news_posted (chat_id, fingerprint) VALUES (?, ?)", [chatId, primaryFingerprint]);
+  if (Number(result?.affectedRows || 0) !== 1) return false;
+
+  for (const fingerprint of fingerprints) {
+    if (fingerprint === primaryFingerprint) continue;
+    await db.execute("INSERT IGNORE INTO tel_news_posted (chat_id, fingerprint) VALUES (?, ?)", [chatId, fingerprint]);
+  }
+
+  await prunePostedFingerprints(chatId);
+  return true;
+}
+
+async function hasPostedFingerprint(chatId, fingerprints) {
+  const placeholders = fingerprints.map(() => "?").join(", ");
+  const rows = await db.query(
+    `SELECT fingerprint FROM tel_news_posted WHERE chat_id = ? AND fingerprint IN (${placeholders}) LIMIT 1`,
+    [chatId, ...fingerprints]
+  );
+
+  return rows.length > 0;
+}
+
+async function prunePostedFingerprints(chatId) {
+  await db.execute(
+    [
+      "DELETE FROM tel_news_posted",
+      "WHERE chat_id = ? AND fingerprint NOT IN (",
+      "SELECT fingerprint FROM (",
+      "SELECT fingerprint FROM tel_news_posted WHERE chat_id = ? ORDER BY created_at DESC LIMIT 200",
+      ") AS keep_rows",
+      ")",
+    ].join(" "),
+    [chatId, chatId]
+  );
 }
 
 function articleFingerprints(article) {
